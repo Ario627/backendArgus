@@ -38,16 +38,19 @@ export class FleetWatchdogService {
       .update()
       .set({ operationalStatus: OperationalStatus.STALE })
       .where(
-        `operational_status IN (:...online) AND deleted_at IS NULL AND last_device_timestamp IS NOT NULL AND last_device_timestamp < now() - interval ':sec seconds'`, 
+        `operational_status IN (:...online) AND deleted_at IS NULL AND last_device_timestamp IS NOT NULL AND last_device_timestamp < now() - make_interval(secs => :sec)`,
         {
-            online: [OperationalStatus.ONLINE_NORMAL, OperationalStatus.ONLINE_BROKEN],
-            sec: this.staleThresholdSeconds,
+          online: [
+            OperationalStatus.ONLINE_NORMAL,
+            OperationalStatus.ONLINE_BROKEN,
+          ],
+          sec: this.staleThresholdSeconds,
         },
       )
       .execute();
 
-    if(result.affected && result.affected > 0) {
-        this.logger.warn(`${result.affected} fleet(s) transitioned to STALE`);
+    if (result.affected && result.affected > 0) {
+      this.logger.warn(`${result.affected} fleet(s) transitioned to STALE`);
     }
   }
 
@@ -57,7 +60,7 @@ export class FleetWatchdogService {
       .update()
       .set({ operationalStatus: OperationalStatus.OFFLINE })
       .where(
-        `operational_status = :stale AND deleted_at IS NULL AND last_device_timestamp < now() - interval ':sec seconds'`,
+        `operational_status = :stale AND deleted_at IS NULL AND last_device_timestamp < now() - make_interval(secs => :sec)`,
         {
           stale: OperationalStatus.STALE,
           sec: this.offlineThresholdSeconds,

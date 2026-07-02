@@ -1,0 +1,151 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: argus-postgres-prod
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-argus}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?error}
+      POSTGRES_DB: ${DB_NAME:-argus}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ./scripts/init-timescaledb.sql:/docker-entrypoint-initdb.d/01-timescaledb.sql
+      - ./src/database/migrations:/docker-entrypoint-initdb.d/02-migrations
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-argus} -d ${DB_NAME:-argus}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - argus-network-prod
+    labels:
+      com.argus.component: "database"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mqtt:
+    image: eclipse-mosquitto:2.0-alpine
+    container_name: argus-mqtt-prod
+    restart: always
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto/mosquitto.conf.prod:/mosquitto/config/mosquitto.conf:ro
+      - ./config/mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ./config/mosquitto/certs:/mosquitto/certs:ro
+      - mqtt_data_prod:/mosquitto/data
+      - mqtt_logs_prod:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "test/health", "-m", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - argus-network-prod
+    labels:
+      com.argus.component: "messaging"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    image: argus-backend:${VERSION:-latest}
+    container_name: argus-backend-prod
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      FRONTEND_URL: ${FRONTEND_URL:?error}
+      DATABASE_URL: ${DATABASE_URL:?error}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-30}
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL:-mqtt://mqtt:1883}
+      MQTT_USERNAME: ${MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_TELEMETRY_TOPIC: ${MQTT_TELEMETRY_TOPIC:-fleet/+/telemetry}
+      MQTT_RECONNECT_PERIOD_MS: 5000
+      MQTT_CONNECT_TIMEOUT_MS: 10000
+      JWT_SECRET: ${JWT_SECRET:?error}
+      JWT_EXPIRES_IN: 8h
+      MAPBOX_API_KEY: ${MAPBOX_API_KEY:?error}
+      MAPBOX_TIMEOUT_MS: 10000
+      LLM_PROVIDER_API_KEY: ${LLM_PROVIDER_API_KEY}
+      LLM_PROVIDER_URL: ${LLM_PROVIDER_URL:-https://api.groq.com/openai/v1/chat/completions}
+      LLM_PROVIDER_MODEL: ${LLM_PROVIDER_MODEL:-llama-3.3-70b-versatile}
+      LLM_PROVIDER_TIMEOUT_MS: 15000
+      OPTIMIZATION_ENGINE_URL: ${OPTIMIZATION_ENGINE_URL:?error}
+      OPTIMIZATION_ENGINE_TIMEOUT_MS: 20000
+      SWARM_RECOVERY_TARGET_MS: 60000
+      SWARM_RECOVERY_OPT_TIMEOUT_MS: 15000
+      STALE_THRESHOLD_SECONDS: 180
+      OFFLINE_THRESHOLD_SECONDS: 600
+      WATCHDOG_INTERVAL_SECONDS: 60
+      TELEMETRY_COMPRESS_AFTER_DAYS: 7
+      TELEMETRY_DROP_AFTER_DAYS: 90
+      LOW_VOLUME_THRESHOLD: 0.20
+      MOVING_AVERAGE_WINDOW_DAYS: 7
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mqtt:
+        condition: service_healthy
+    networks:
+      - argus-network-prod
+    labels:
+      com.argus.component: "api"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+volumes:
+  postgres_data_prod:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/argus/postgres
+  mqtt_data_prod:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/argus/mqtt/data
+  mqtt_logs_prod:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/argus/mqtt/logs
+
+networks:
+  argus-network-prod:
+    driver: bridge

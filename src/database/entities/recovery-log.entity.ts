@@ -34,27 +34,27 @@ export class RecoveryLogEntity {
   @Column({ type: 'jsonb' })
   receivingFleetIds!: string[];
 
-  @Column({ type: 'jsonb' })
+  @Column({ name: 'redistributed_stops', type: 'jsonb' })
   redistributedStops!: RedistributedStop[];
 
-  @Column({ type: 'timestamptz' })
+  @Column({ name: 'detected_at', type: 'timestamptz' })
   detectedAt!: Date;
 
-  @Column({ type: 'timestamptz', nullable: true })
+  @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt!: Date | null;
 
-  @Column({ type: 'integer', nullable: true })
+  @Column({ name: 'duration_ms', type: 'integer', nullable: true })
   durationMs!: number | null;
 
-  @Column({ type: 'boolean', default: false })
+  @Column({ name: 'fallback', type: 'boolean', default: false })
   fallback!: boolean;
 
-  @Column({ type: 'varchar', default: 'success' })
+  @Column({ name: 'status', type: 'varchar', default: 'success' })
   status!: RecoveryStatus;
 
-  @Column({ type: 'text', nullable: true })
+  @Column({ name: 'llm_narrative', type: 'text', nullable: true })
   llmNarrative!: string | null;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

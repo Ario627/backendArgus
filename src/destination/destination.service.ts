@@ -1,5 +1,5 @@
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { Repository, IsNull } from "typeorm";
 import { Injectable, ConflictException, Logger, NotFoundException } from "@nestjs/common";
 import { DestinationEntity } from "src/database/entities/destination.entity";
 import { CreateDestinationDto } from "./dto/create-destination.dto";
@@ -54,7 +54,7 @@ export class DestinationService {
 
   private async findOrFail(id: string): Promise<DestinationEntity> {
     const dest = await this.repo.findOne({
-      where: { id, deletedAt: undefined as never },
+      where: { id, deletedAt: IsNull() },
     });
     if (!dest) throw new NotFoundException(`Destination ${id} not found`);
     return dest;
@@ -65,7 +65,7 @@ export class DestinationService {
     limit: number,
   ): Promise<PaginatedResponse<DestinationEntity>> {
     const [data, total] = await this.repo.findAndCount({
-      where: { deletedAt: undefined as never },
+      where: { deletedAt: IsNull() },
       skip: (page - 1) * limit,
       take: limit,
       order: { createdAt: 'DESC' },

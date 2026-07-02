@@ -1,7 +1,7 @@
 import { InjectRepository } from '@nestjs/typeorm';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { HardwareStatus } from 'src/common/constant/operational-status.constant';
 import { OperationalStatus } from 'src/common/constant/operational-status.constant';
 import { FleetEntity } from 'src/database/entities/fleet.entity';
@@ -30,7 +30,6 @@ export class TelemetryService {
     private readonly repo: Repository<TelemetryEntity>,
     @InjectRepository(FleetEntity)
     private readonly fleetRepo: Repository<FleetEntity>,
-    private readonly dataSource: DataSource,
     config: ConfigService,
   ) {
     const va = config.get<{ lowVolumeThreshold: number }>('app.volumeAnomaly')!;

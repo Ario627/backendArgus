@@ -28,6 +28,7 @@ export class DestinationEntity {
   longitude!: number;
 
   @Column({
+    name: 'capacity_kg',
     type: 'integer',
     default: DEFAULT_DESTINATION_CAPACITY_KG,
   })
@@ -36,15 +37,15 @@ export class DestinationEntity {
   @Column({ type: 'integer', default: DEFAULT_DESTINATION_PRIORITY })
   priority!: number;
 
-  @Column({ type: 'boolean', default: false })
+  @Column({name: 'low_volume_flag', type: 'boolean', default: false })
   lowVolumeFlag!: boolean;
 
-  @Column({ type: 'timestamptz', nullable: true })
+  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt!: Date | null;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 
-  @UpdateDateColumn({ type: 'timestamptz' })
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt!: Date;
 }

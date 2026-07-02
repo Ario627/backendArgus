@@ -15,7 +15,7 @@ import { UserEntity } from "src/database/entities/user.entity";
             imports: [ConfigModule],
             inject: [ConfigService],
             useFactory: (config: ConfigService) => {
-                const jwt = config.get<{secret: string, expiresIn: string}>('app.module')!;
+                const jwt = config.get<{secret: string, expiresIn: string}>('app.jwt')!;
                 return {
                     secret: jwt.secret,
                     expiresIn: jwt.expiresIn

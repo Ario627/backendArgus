@@ -1,0 +1,44 @@
+# Mosquitto Configuration - Production
+
+# MQTT (TLS)
+listener 1883
+protocol mqtt
+require_certificate false
+allow_anonymous false
+password_file /mosquitto/config/passwd
+max_connections 10000
+max_queued_messages 1000
+message_size_limit 0
+retain_available true
+
+# MQTT (TLS Secure)
+listener 8883
+protocol mqtt
+cafile /mosquitto/certs/ca.crt
+certfile /mosquitto/certs/server.crt
+keyfile /mosquitto/certs/server.key
+require_certificate false
+allow_anonymous false
+password_file /mosquitto/config/passwd
+max_connections 10000
+
+# WebSocket (TLS)
+listener 9001
+protocol websockets
+cafile /mosquitto/certs/ca.crt
+certfile /mosquitto/certs/server.crt
+keyfile /mosquitto/certs/server.key
+allow_anonymous false
+password_file /mosquitto/config/passwd
+
+persistence true
+persistence_location /mosquitto/data/
+
+log_dest file /mosquitto/log/mosquitto.log
+log_dest stdout
+log_type all
+log_timestamp true
+
+# Performance
+autosave_interval 1800
+autosave_on_changes true

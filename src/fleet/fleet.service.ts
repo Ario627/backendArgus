@@ -1,10 +1,15 @@
-import { InjectRepository } from "@nestjs/typeorm";
-import { Injectable, Logger, NotFoundException, ConflictException } from "@nestjs/common";
-import { Repository } from "typeorm";
-import { FleetEntity } from "src/database/entities/fleet.entity";
-import { CreateFleetDto } from "./dto/create-fleet.dto";
-import { UpdateFleetDto } from "./dto/update-fleet.dto";
-import type { PaginatedResponse } from "src/common/types";
+import { InjectRepository } from '@nestjs/typeorm';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
+import { IsNull, Repository } from 'typeorm';
+import { FleetEntity } from 'src/database/entities/fleet.entity';
+import { CreateFleetDto } from './dto/create-fleet.dto';
+import { UpdateFleetDto } from './dto/update-fleet.dto';
+import type { PaginatedResponse } from 'src/common/types';
 
 const PG_UNIQUE_VIOLATION = '23505';
 @Injectable()
@@ -58,7 +63,7 @@ export class FleetService {
 
   private async findOrFail(id: string): Promise<FleetEntity> {
     const fleet = await this.repo.findOne({
-      where: { id, deletedAt: undefined as never },
+      where: { id, deletedAt: IsNull() },
     });
     if (!fleet) throw new NotFoundException(`Fleet ${id} not found`);
     return fleet;
@@ -69,7 +74,7 @@ export class FleetService {
     limit: number,
   ): Promise<PaginatedResponse<FleetEntity>> {
     const [data, total] = await this.repo.findAndCount({
-      where: { deletedAt: undefined as never },
+      where: { deletedAt: IsNull() },
       skip: (page - 1) * limit,
       take: limit,
       order: { createdAt: 'DESC' },

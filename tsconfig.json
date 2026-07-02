@@ -15,7 +15,6 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "baseUrl": "./",
-    "ignoreDeprecations": "6.0",
     "incremental": false,
     "skipLibCheck": true,
     "strict": true,
@@ -24,8 +23,8 @@
     "strictBindCallApply": true,
     "strictPropertyInitialization": true,
     "noFallthroughCasesInSwitch": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*"],

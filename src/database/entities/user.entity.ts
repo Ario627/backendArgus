@@ -17,7 +17,7 @@ export class UserEntity {
   @Column({ type: 'varchar', unique: true })
   username!: string;
 
-  @Column({ type: 'varchar', select: false })
+  @Column({ name: 'password_hash', type: 'varchar', select: false })
   passwordHash!: string;
 
   @Column({ type: 'varchar' })
@@ -30,6 +30,6 @@ export class UserEntity {
   @JoinColumn({ name: 'fleet_id', referencedColumnName: 'id' })
   fleet!: FleetEntity | null;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

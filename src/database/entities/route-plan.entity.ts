@@ -33,24 +33,24 @@ export class RoutePlanEntity {
   @JoinColumn({ name: 'fleet_id', referencedColumnName: 'id' })
   fleet!: FleetEntity;
 
-  @Column({ type: 'date' })
+  @Column({ name: 'plan_date', type: 'date' })
   planDate!: string;
 
-  @Column({ type: 'jsonb' })
+  @Column({ name: 'stops', type: 'jsonb' })
   stops!: RoutePlanStop[];
 
-  @Column({ type: 'numeric', precision: 10, scale: 2 })
+  @Column({ name: 'total_km', type: 'numeric', precision: 10, scale: 2 })
   totalKm!: number;
 
-  @Column({ type: 'integer' })
+  @Column({ name: 'total_minutes', type: 'integer' })
   totalMinutes!: number;
 
-  @Column({ type: 'varchar', default: 'active' })
+  @Column({ name: 'status', type: 'varchar', default: 'active' })
   status!: RoutePlanStatus;
 
-  @Column({ type: 'boolean', default: false })
+  @Column({ name: 'low_confidence', type: 'boolean', default: false })
   lowConfidence!: boolean;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

@@ -13,6 +13,7 @@ import {
 @Index(['fleetId', 'deviceTimestamp'])
 @Index(['deviceTimestamp'])
 export class TelemetryEntity {
+  @PrimaryGeneratedColumn('uuid')
   id!: string;
 
   @Column({ type: 'varchar', name: 'fleet_id' })

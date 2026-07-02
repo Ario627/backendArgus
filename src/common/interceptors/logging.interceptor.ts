@@ -11,6 +11,22 @@ import { Request, Response } from 'express';
 const MAX_BODY_LOG_LENGTH = 500;
 const MQTT_INTERNAL_PATH_PREFIX = '/mqtt';
 
+const AUTH_SENSITIVE_KEYS = new Set(['password', 'passwordHash']);
+
+const PRODUCTION_SENSITIVE_KEYS = new Set([
+  'password',
+  'passwordHash',
+  'username',
+  'email',
+  'accessToken',
+  'refreshToken',
+  'token',
+  'authorization',
+  'secret',
+  'apiKey',
+  'jwt',
+]);
+
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger(LoggingInterceptor.name);
@@ -51,8 +67,14 @@ export class LoggingInterceptor implements NestInterceptor {
   private truncateBody(body: unknown): string {
     if (body === undefined || body === null) return ``;
 
-    const str = typeof body === 'string' ? body : JSON.stringify(body);
-    if (str.length <= MAX_BODY_LOG_LENGTH) return str;
+    const sanitized = this.sanitizeBody(body);
+
+    const str =
+      typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
+
+    if (str.length <= MAX_BODY_LOG_LENGTH) {
+      return str;
+    }
 
     return `${str.slice(0, MAX_BODY_LOG_LENGTH)}... [truncated]`;
   }
@@ -62,5 +84,38 @@ export class LoggingInterceptor implements NestInterceptor {
       return err.message;
     }
     return 'non-Error throw';
+  }
+
+  private sanitizeBody(body: unknown): unknown {
+    if (body === null || body === undefined) {
+      return body;
+    }
+
+    if (Array.isArray(body)) {
+      return body.map((item) => this.sanitizeBody(item));
+    }
+
+    if (typeof body !== 'object') {
+      return body;
+    }
+
+    const sensitiveKeys = this.getSensitiveKeys();
+    const sanitized: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(
+      body as Record<string, unknown>,
+    )) {
+      sanitized[key] = sensitiveKeys.has(key)
+        ? '********'
+        : this.sanitizeBody(value);
+    }
+
+    return sanitized;
+  }
+
+  private getSensitiveKeys(): Set<string> {
+    return process.env.NODE_ENV === 'production'
+      ? PRODUCTION_SENSITIVE_KEYS
+      : AUTH_SENSITIVE_KEYS;
   }
 }
