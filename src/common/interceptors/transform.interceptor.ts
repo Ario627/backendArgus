@@ -14,6 +14,8 @@ export class TransformInterceptor<T> implements NestInterceptor<T, WrappedRespon
     constructor(private readonly reflector: Reflector) {}
 
     intercept(context: ExecutionContext, next: CallHandler<T>): Observable<WrappedResponse<T> | T> {
+        if (context.getType() !== 'http') return next.handle();
+
         const isRaw = this.reflector.getAllAndOverride<boolean>(RAW_RESPONSE_KEY, [
             context.getHandler(),
             context.getClass()

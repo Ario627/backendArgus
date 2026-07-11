@@ -43,13 +43,49 @@ export class LlmEngineService {
     return this.callLlm(prompt);
   }
 
+  async summarizeDashboard(
+    fleetCount: number,
+    recoveryCount: number,
+  ): Promise<string | null> {
+    const prompt = `Kamu adalah asisten sistem manajemen armada truk sampah ARGUS.
+Ringkas kondisi operasional saat ini (max 100 kata):
+- ${fleetCount} armada truk terdaftar
+- ${recoveryCount} kejadian swarm recovery hari ini
+Berikan insight tentang efisiensi operasional dan rekomendasi singkat dalam bahasa Indonesia.`;
+    return this.callLlm(prompt);
+  }
+
   private async callLlm(prompt: string): Promise<string | null> {
-    if (!this.apiKey) return null;
+    if (!this.apiKey) {
+      this.logger.warn('LLM API key not configured, skipping narrative');
+      return null;
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
+      const isGemini = this.url.includes('generativelanguage.googleapis.com');
+
+      if (isGemini) {
+        const geminiUrl = `${this.url}/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
+        const { data } = await firstValueFrom(
+          this.http.post(
+            geminiUrl,
+            {
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { maxOutputTokens: 500, temperature: 0.7 },
+            },
+            {
+              headers: { 'Content-Type': 'application/json' },
+              signal: controller.signal,
+            },
+          ),
+        );
+        return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+      }
+
+      // OpenAI-compatible API (Groq, OpenAI, etc.)
       const { data } = await firstValueFrom(
         this.http.post(
           this.url,

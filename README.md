@@ -276,6 +276,12 @@ docker run -d \
 npm run migration:run
 ```
 
+This runs the SQL migrations in order:
+
+1. `src/database/migrations/0001_init_schema.sql`
+2. `src/database/migrations/0002_seed_admin.sql`
+3. `src/database/migrations/0003_devices_and.sql`
+
 ### 7. Start Development Server
 
 ```bash

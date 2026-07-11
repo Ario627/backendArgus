@@ -2,6 +2,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, IsNull } from "typeorm";
 import { Injectable, ConflictException, Logger, NotFoundException } from "@nestjs/common";
 import { DestinationEntity } from "src/database/entities/destination.entity";
+import { DestinationType } from "src/common/constant/destination.constant";
 import { CreateDestinationDto } from "./dto/create-destination.dto";
 import { UpdateDestinationDto } from "./dto/update-destination.dto";
 import type { PaginatedResponse } from "src/common/types";
@@ -44,6 +45,33 @@ export class DestinationService {
     } catch (err) {
       throw this.toConflict(err);
     }
+  }
+
+  async upsertFromTelemetry(payload: Record<string, unknown>): Promise<DestinationEntity> {
+    const destId = payload.destinationId as string;
+    if (!destId) throw new NotFoundException('Missing destinationId in telemetry payload');
+
+    let dest = await this.repo.findOne({ where: { id: destId, deletedAt: IsNull() } });
+
+    if (dest) {
+      if (typeof payload.currentLoadKg === 'number') {
+        dest.capacityKg = dest.capacityKg || ((payload.capacityKg as number) ?? 10000);
+      }
+      dest.lowVolumeFlag = (payload.lowVolumeFlag as boolean) ?? dest.lowVolumeFlag;
+    } else {
+      dest = this.repo.create({
+        id: destId,
+        name: (payload.name as string) ?? destId,
+        type: (payload.type as string ?? 'TPS') as DestinationEntity['type'],
+        latitude: (payload.latitude as number) ?? 0,
+        longitude: (payload.longitude as number) ?? 0,
+        capacityKg: (payload.capacityKg as number) ?? 10000,
+        priority: 5,
+        lowVolumeFlag: false,
+      });
+    }
+
+    return this.repo.save(dest);
   }
 
   async softDelete(id: string): Promise<{ id: string }> {

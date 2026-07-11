@@ -29,21 +29,21 @@ export class TelemetryEntity {
   @Column({ type: 'double precision' })
   longitude!: number;
 
-  @Column({ type: 'double precision' })
+  @Column({ name: 'speed_kmh', type: 'double precision' })
   speedKmh!: number;
 
-  @Column({ type: 'smallint' })
+  @Column({ name: 'volume_percent', type: 'smallint' })
   volumePercent!: number;
 
-  @Column({ type: 'varchar' })
+  @Column({ name: 'hardware_status', type: 'varchar' })
   hardwareStatus!: HardwareStatus;
 
-  @Column({ type: 'timestamptz' })
+  @Column({ name: 'device_timestamp', type: 'timestamptz' })
   deviceTimestamp!: Date;
 
-  @Column({ type: 'timestamptz', default: () => 'now()' })
+  @Column({ name: 'received_at', type: 'timestamptz', default: () => 'now()' })
   receivedAt!: Date;
 
-  @Column({ type: 'timestamptz', default: () => 'now()' })
+  @Column({ name: 'ingested_at', type: 'timestamptz', default: () => 'now()' })
   ingestedAt!: Date;
 }

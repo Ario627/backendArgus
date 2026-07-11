@@ -38,6 +38,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
   }
 
   catch(exception: unknown, host: ArgumentsHost): void {
+    // ── Non-HTTP contexts (e.g. MQTT/RPC) — log & rethrow, don't send HTTP response ──
+    if (host.getType() !== 'http') {
+      const msg = exception instanceof Error ? exception.message : String(exception);
+      this.logger.error(`[RPC] ${msg}`);
+      if (exception instanceof Error) {
+        this.logger.error(exception.stack);
+      }
+      throw exception;
+    }
+
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();

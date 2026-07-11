@@ -1,12 +1,14 @@
 import { InjectRepository } from '@nestjs/typeorm';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { HardwareStatus } from 'src/common/constant/operational-status.constant';
 import { OperationalStatus } from 'src/common/constant/operational-status.constant';
 import { FleetEntity } from 'src/database/entities/fleet.entity';
 import { TelemetryEntity } from 'src/database/entities/telemetry.entity';
-import type { TelemetryPayload } from 'src/common/types';
+import { RecoveryService } from 'src/optimization/recovery.service';
+import { TelemetryEventsService } from './telemetry-events.service';
+import type { TelemetryPayload, FleetPosition } from 'src/common/types';
 
 const EMA_ALPHA = 0.3;
 const CHUNK_SIZE = 50;
@@ -30,7 +32,9 @@ export class TelemetryService {
     private readonly repo: Repository<TelemetryEntity>,
     @InjectRepository(FleetEntity)
     private readonly fleetRepo: Repository<FleetEntity>,
+    private readonly recoveryService: RecoveryService,
     config: ConfigService,
+    @Optional() private readonly events?: TelemetryEventsService,
   ) {
     const va = config.get<{ lowVolumeThreshold: number }>('app.volumeAnomaly')!;
     const liveness = config.get<{ staleThresholdSeconds: number }>(
@@ -62,6 +66,8 @@ export class TelemetryService {
       );
       this.triggerRecoveryAsync(fleet.id);
     }
+
+    this.emitFleetPosition(fleet.id, fleet.plateNumber);
   }
 
   async ingestBatch(payloads: readonly TelemetryPayload[]): Promise<void> {
@@ -215,8 +221,44 @@ export class TelemetryService {
   }
 
   private triggerRecoveryAsync(fleetId: string): void {
-    this.logger.log(
-      `Recovery trigger queued for fleet ${fleetId} (wire to RecoveryService when Fase G implemented)`,
-    );
+    this.logger.log(`Recovery triggered for fleet ${fleetId}`);
+    this.recoveryService
+      .trigger(fleetId)
+      .then((result) => {
+        this.logger.log(
+          `Recovery completed for fleet ${fleetId} — status=${result.status}, duration=${result.durationMs}ms`,
+        );
+      })
+      .catch((err) => {
+        this.logger.error(
+          `Recovery failed for fleet ${fleetId}: ${(err as Error).message}`,
+        );
+      });
+  }
+
+  private async emitFleetPosition(fleetId: string, plateNumber: string): Promise<void> {
+    if (!this.events) return;
+    try {
+      const fleet = await this.fleetRepo.findOne({ where: { id: fleetId } });
+      if (!fleet) return;
+      const now = Date.now();
+      const stalenessSeconds = fleet.lastDeviceTimestamp
+        ? Math.floor((now - fleet.lastDeviceTimestamp.getTime()) / 1000)
+        : 0;
+      this.events.emitFleetPosition({
+        fleetId: fleet.id,
+        plateNumber: fleet.plateNumber,
+        latitude: fleet.lastLat ?? 0,
+        longitude: fleet.lastLng ?? 0,
+        operationalStatus: fleet.operationalStatus,
+        lastDeviceTimestamp: fleet.lastDeviceTimestamp ?? new Date(0),
+        stalenessSeconds,
+        isRealTime: stalenessSeconds < this.staleThresholdSeconds,
+        volumePercent: fleet.lastVolumePercent ?? 0,
+        hardwareStatus: fleet.lastHardwareStatus ?? fleet.statusHardware,
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to emit fleet position: ${(err as Error).message}`);
+    }
   }
 }

@@ -7,11 +7,24 @@ import {
 } from '@nestjs/common';
 import { IsNull, Repository } from 'typeorm';
 import { FleetEntity } from 'src/database/entities/fleet.entity';
+import { DeviceEntity, DeviceStatus } from 'src/database/entities/device.entity';
 import { CreateFleetDto } from './dto/create-fleet.dto';
 import { UpdateFleetDto } from './dto/update-fleet.dto';
 import type { PaginatedResponse } from 'src/common/types';
 
 const PG_UNIQUE_VIOLATION = '23505';
+
+export interface FleetCsvRow {
+  fleetId: string;
+  plateNumber: string;
+  driverName: string;
+  driverContact: string;
+  capacityKg: number;
+  deviceId: string;
+  statusHardware: string;
+  operationalStatus: string;
+}
+
 @Injectable()
 export class FleetService {
   private readonly logger = new Logger(FleetService.name);
@@ -19,6 +32,8 @@ export class FleetService {
   constructor(
     @InjectRepository(FleetEntity)
     private readonly repo: Repository<FleetEntity>,
+    @InjectRepository(DeviceEntity)
+    private readonly deviceRepo: Repository<DeviceEntity>,
   ) {}
 
   findAll(page = 1, limit = 20): Promise<PaginatedResponse<FleetEntity>> {
@@ -91,5 +106,34 @@ export class FleetService {
     }
     this.logger.error(`Fleet save failed: ${(err as Error).message}`);
     return new ConflictException('Conflict');
+  }
+
+  async exportCsv(): Promise<FleetCsvRow[]> {
+    const fleets = await this.repo.find({
+      where: { deletedAt: IsNull() },
+      order: { createdAt: 'DESC' },
+    });
+
+    const devices = await this.deviceRepo.find({
+      where: { status: DeviceStatus.ASSIGNED },
+    });
+
+    const deviceMap = new Map<string, string>();
+    for (const d of devices) {
+      if (d.fleetId) {
+        deviceMap.set(d.fleetId, d.deviceId);
+      }
+    }
+
+    return fleets.map((f) => ({
+      fleetId: f.id,
+      plateNumber: f.plateNumber,
+      driverName: f.driverName,
+      driverContact: f.driverContact ?? '',
+      capacityKg: f.capacityKg,
+      deviceId: deviceMap.get(f.id) ?? '',
+      statusHardware: f.statusHardware,
+      operationalStatus: f.operationalStatus,
+    }));
   }
 }

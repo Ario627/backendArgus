@@ -23,6 +23,9 @@ export class JwtAuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    // ── Non-HTTP contexts (e.g. MQTT/RPC) don't go through JWT auth ───────
+    if (context.getType() !== 'http') return true;
+
     if (this.isPublic(context)) return true;
 
     const request = context.switchToHttp().getRequest<AuthedRequest>();

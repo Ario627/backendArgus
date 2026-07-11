@@ -35,6 +35,26 @@ export class LoggingInterceptor implements NestInterceptor {
     context: ExecutionContext,
     next: CallHandler<any>,
   ): Observable<any> {
+    if (context.getType() !== 'http') {
+      const pattern = this.getRpcPattern(context);
+      const startTime = Date.now();
+      this.logger.log(`[RPC] ${pattern} — received`);
+      return next.handle().pipe(
+        tap({
+          next: () => {
+            const duration = Date.now() - startTime;
+            this.logger.log(`[RPC] ${pattern} — OK ${duration}ms`);
+          },
+          error: (err: unknown) => {
+            const duration = Date.now() - startTime;
+            this.logger.error(
+              `[RPC] ${pattern} — ERROR ${duration}ms ${this.extractErrorMessage(err)}`,
+            );
+          },
+        }),
+      );
+    }
+
     const ctx = context.switchToHttp();
     const request = ctx.getRequest<Request>();
     const response = ctx.getResponse<Response>();
@@ -62,6 +82,18 @@ export class LoggingInterceptor implements NestInterceptor {
         },
       }),
     );
+  }
+
+  private getRpcPattern(context: ExecutionContext): string {
+    // NestJS MQTT microservice: args[0] = topic, args[1] = payload (Buffer)
+    const args = (context as any).args ?? [];
+    if (typeof args[0] === 'string') return args[0];
+    // Fallback: check pattern in various locations
+    const pattern = args[0] ?? (context as any).pattern;
+    if (typeof pattern === 'string') return pattern;
+    if (pattern && typeof pattern.topic === 'string') return pattern.topic;
+    if (pattern && typeof pattern.pattern === 'string') return pattern.pattern;
+    return 'unknown-rpc';
   }
 
   private truncateBody(body: unknown): string {

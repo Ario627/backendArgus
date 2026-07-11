@@ -9,7 +9,7 @@ import {
 
 export class CreateFleetDto {
   @IsString()
-  @Matches(/^[A-Z0-9-]{3,12}$/)
+  @Matches(/^[A-Z0-9 -]{3,15}$/)
   readonly plateNumber!: string;
 
   @IsString()

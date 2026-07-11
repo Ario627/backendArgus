@@ -7,6 +7,8 @@ import { TelemetryEntity } from './entities/telemetry.entity';
 import { RoutePlanEntity } from './entities/route-plan.entity';
 import { RecoveryLogEntity } from './entities/recovery-log.entity';
 import { UserEntity } from './entities/user.entity';
+import { DeviceEntity } from './entities/device.entity';
+import { ProvisioningTokenEntity } from './entities/provisioning-token.entity';
 
 const ENTITIES = [
   FleetEntity,
@@ -15,6 +17,8 @@ const ENTITIES = [
   RoutePlanEntity,
   RecoveryLogEntity,
   UserEntity,
+  DeviceEntity,
+  ProvisioningTokenEntity,
 ];
 
 @Module({

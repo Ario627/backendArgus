@@ -142,7 +142,6 @@ export class DashboardService {
     fleetCount: number,
     recoveryCount: number,
   ): Promise<string | null> {
-    const prompt = `Ringkas dashboard: ${fleetCount} armada, ${recoveryCount} recovery hari ini. Insight singkat (max 100 kata).`;
-    return this.llm.summarizeRoutePlan([]).catch(() => null) ?? null;
+    return this.llm.summarizeDashboard(fleetCount, recoveryCount);
   }
 }

@@ -30,12 +30,28 @@ export interface TelemetryPayload {
   readonly deviceTimestamp: string;
 }
 
+export interface GeoPoint {
+  readonly id: string;
+  readonly lat: number;
+  readonly lng: number;
+}
+
+export interface BrokenStop {
+  readonly destId: string;
+  readonly demandKg: number;
+  readonly priority: number;
+}
+
+export interface GreedyAssignment {
+  readonly receiverFleetId: string;
+  readonly stops: BrokenStop[];
+}
+
 export interface VehicleInput {
   readonly id: string;
   readonly startLat: number;
   readonly startLng: number;
   readonly capacityKg: number;
-  readonly currentLoadKg: number;
 }
 
 export interface DestinationInput {
