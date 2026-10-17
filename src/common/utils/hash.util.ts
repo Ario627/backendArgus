@@ -77,6 +77,9 @@ export const canonicalJson = (value: unknown): string => {
 export const sha256Hex = (value: string): string =>
   createHash('sha256').update(value, 'utf8').digest('hex');
 
+export const sha256HexOfBytes = (bytes: Uint8Array): string =>
+  createHash('sha256').update(bytes).digest('hex');
+
 export const hitungHash = (prevHash: string | null, payload: unknown): string =>
   sha256Hex(`${prevHash ?? GENESIS_PREV_HASH}|${canonicalJson(payload)}`);
 

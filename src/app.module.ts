@@ -15,6 +15,7 @@ import { DatabaseModule } from './database/database.module.js';
 import { FacilityModule } from './facility/facility.module.js';
 import { HealthModule } from './health/health.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
+import { PhotoModule } from './photo/photo.module.js';
 import { SppgModule } from './sppg/sppg.module.js';
 import { SyncModule } from './sync/sync.module.js';
 
@@ -45,6 +46,7 @@ const THROTTLE_WINDOW_MS = 60000;
     LedgerModule,
     BatchModule,
     SyncModule,
+    PhotoModule,
     HealthModule,
   ],
   providers: [

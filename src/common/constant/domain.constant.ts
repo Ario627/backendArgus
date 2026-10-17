@@ -19,6 +19,13 @@ export const GATE_SEVERITY: Readonly<Record<GateStatus, number>> = Object.freeze
   TOLAK: 3,
 });
 
+export const GATE_REJECT_PROBABILITY: Readonly<Record<GateStatus, number>> = Object.freeze({
+  LOLOS: 0,
+  PERBAIKI: 0.25,
+  ALIHKAN: 0.6,
+  TOLAK: 1,
+});
+
 export const FRACTION_CODES = Object.freeze(['A', 'B', 'C', 'D', 'E'] as const);
 export type FractionCode = (typeof FRACTION_CODES)[number];
 

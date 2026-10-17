@@ -33,7 +33,7 @@ const STATUS_MESSAGES: Readonly<Record<number, string>> = Object.freeze({
   403: 'Anda tidak punya akses untuk tindakan ini',
   404: 'Data tidak ditemukan',
   409: 'Permintaan bertentangan dengan kondisi data saat ini',
-  413: 'Berkas terlalu besar',
+  413: 'Foto terlalu besar (maks 1 MB)',
   422: 'Data yang dikirim tidak valid',
   429: 'Terlalu banyak permintaan',
   500: 'Terjadi kesalahan internal',
@@ -66,12 +66,30 @@ const FRAMEWORK_DEFAULT_MESSAGES: ReadonlySet<string> = new Set([
   'Unauthorized',
   'Forbidden resource',
   'Forbidden',
+  'File too large',
+  'Unexpected file field',
+  'Multipart: Boundary not found',
+  'Too many parts',
+  'Too many files',
+  'Too many fields',
+  'Field name too long',
+  'Field value too long',
+  'Field name missing',
+  'Field name nesting too deep',
+  'Field name array index too large',
+  'Invalid field name',
 ]);
+
+const baseFrameworkMessage = (value: string): string => {
+  const separator = value.indexOf(' - ');
+  return separator === -1 ? value : value.slice(0, separator);
+};
 
 const resolveMessage = (status: number, raw: string): string => {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return fallbackMessage(status);
   if (FRAMEWORK_DEFAULT_MESSAGES.has(trimmed)) return fallbackMessage(status);
+  if (FRAMEWORK_DEFAULT_MESSAGES.has(baseFrameworkMessage(trimmed))) return fallbackMessage(status);
   if (NEST_ROUTE_MESSAGE.test(trimmed)) return fallbackMessage(status);
   if (EXCEPTION_CLASS_PREFIX.test(trimmed)) return fallbackMessage(status);
   return clamp(trimmed, MAX_MESSAGE_LENGTH);
