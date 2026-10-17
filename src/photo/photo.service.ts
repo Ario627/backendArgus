@@ -7,6 +7,7 @@ import { safeHashEquals, sha256HexOfBytes } from '../common/utils/hash.util.js';
 import { Batch } from '../database/entities/batch.entity.js';
 import { LedgerEvent } from '../database/entities/ledger-event.entity.js';
 import { Photo } from '../database/entities/photo.entity.js';
+import { Ticket } from '../database/entities/ticket.entity.js';
 import type { UploadPhotoDto } from './dto/upload-photo.dto.js';
 import {
   photoDimensionsInvalidError,
@@ -17,7 +18,11 @@ import {
   photoTooLargeError,
 } from './photo.errors.js';
 import { sanitizePhoto } from './photo-image.util.js';
-import { toPhotoDto, type PhotoLinkDto, type PhotoUploadDto } from './photo.mapper.js';
+import {
+  toPhotoDto,
+  type PhotoLinkDto,
+  type PhotoUploadDto,
+} from './photo.mapper.js';
 import { StorageService } from './storage.service.js';
 
 const AUDIT_ROLES: ReadonlySet<string> = new Set(['admin', 'dlh_auditor']);
@@ -25,10 +30,14 @@ const AUDIT_ROLES: ReadonlySet<string> = new Set(['admin', 'dlh_auditor']);
 @Injectable()
 export class PhotoService {
   constructor(
-    @InjectRepository(Photo) private readonly photoRepository: Repository<Photo>,
-    @InjectRepository(Batch) private readonly batchRepository: Repository<Batch>,
+    @InjectRepository(Photo)
+    private readonly photoRepository: Repository<Photo>,
+    @InjectRepository(Batch)
+    private readonly batchRepository: Repository<Batch>,
     @InjectRepository(LedgerEvent)
     private readonly ledgerEventRepository: Repository<LedgerEvent>,
+    @InjectRepository(Ticket)
+    private readonly ticketRepository: Repository<Ticket>,
     private readonly storageService: StorageService,
   ) {}
 
@@ -53,13 +62,18 @@ export class PhotoService {
     const sanitized = await sanitizePhoto(file.buffer, maxBytes);
     if (!sanitized.ok) {
       if (sanitized.code === 'PHOTO_TOO_LARGE') throw photoTooLargeError();
-      if (sanitized.code === 'PHOTO_DIMENSIONS_INVALID') throw photoDimensionsInvalidError(sanitized.detail);
+      if (sanitized.code === 'PHOTO_DIMENSIONS_INVALID')
+        throw photoDimensionsInvalidError(sanitized.detail);
       throw photoFormatInvalidError(sanitized.detail);
     }
 
     const storedHash = sha256HexOfBytes(sanitized.photo.buffer);
     if (!(await this.storageService.has(storedHash))) {
-      await this.storageService.put(storedHash, sanitized.photo.buffer, sanitized.photo.mime);
+      await this.storageService.put(
+        storedHash,
+        sanitized.photo.buffer,
+        sanitized.photo.mime,
+      );
     }
 
     const refType = dto.refType ?? 'lainnya';
@@ -80,7 +94,9 @@ export class PhotoService {
       ],
     );
 
-    const row = await this.photoRepository.findOne({ where: { sha256: storedHash } });
+    const row = await this.photoRepository.findOne({
+      where: { sha256: storedHash },
+    });
     if (row === null) throw photoNotFoundError();
 
     return {
@@ -90,30 +106,52 @@ export class PhotoService {
     };
   }
 
-  async getSignedUrl(sha256: string, actor: AuthenticatedUser): Promise<PhotoLinkDto> {
+  async getSignedUrl(
+    sha256: string,
+    actor: AuthenticatedUser,
+  ): Promise<PhotoLinkDto> {
     const photo = await this.photoRepository.findOne({ where: { sha256 } });
     if (photo === null) throw photoNotFoundError();
     await this.assertViewable(photo, actor);
-    return { ...toPhotoDto(photo), url: await this.storageService.signedGetUrl(photo.sha256) };
+    return {
+      ...toPhotoDto(photo),
+      url: await this.storageService.signedGetUrl(photo.sha256),
+    };
   }
 
-  private async assertViewable(photo: Photo, actor: AuthenticatedUser): Promise<void> {
+  private async assertViewable(
+    photo: Photo,
+    actor: AuthenticatedUser,
+  ): Promise<void> {
     if (AUDIT_ROLES.has(actor.role)) return;
 
     if (photo.refTipe === 'batch' || photo.refTipe === 'ledger_event') {
       const batchId =
         photo.refTipe === 'batch'
           ? photo.refId
-          : (await this.ledgerEventRepository.findOne({ where: { id: Number(photo.refId ?? 0) } }))?.batchId ??
-            null;
+          : ((
+              await this.ledgerEventRepository.findOne({
+                where: { id: Number(photo.refId ?? 0) },
+              })
+            )?.batchId ?? null);
       if (batchId === null) throw forbiddenActionError();
-      const batch = await this.batchRepository.findOne({ where: { id: batchId } });
+      const batch = await this.batchRepository.findOne({
+        where: { id: batchId },
+      });
       if (batch === null) throw forbiddenActionError();
       if (actor.role === 'sppg_staff' && actor.sppgId === batch.sppgId) return;
       throw forbiddenActionError();
     }
 
     if (photo.refTipe === 'tiket') {
+      if (photo.refId === null) throw forbiddenActionError();
+      const ticket = await this.ticketRepository.findOne({
+        where: { id: photo.refId },
+      });
+      if (ticket === null) throw forbiddenActionError();
+      if (actor.role === 'sppg_staff' && actor.sppgId === ticket.sppgId) {
+        return;
+      }
       throw forbiddenActionError();
     }
 

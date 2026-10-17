@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -85,6 +86,16 @@ export class StorageService {
         this.client,
         new GetObjectCommand({ Bucket: this.bucket, Key: key }),
         { expiresIn: this.signedUrlTtlSeconds },
+      );
+    } catch {
+      throw storageUnavailable();
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    try {
+      await this.client.send(
+        new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
       );
     } catch {
       throw storageUnavailable();

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AnomalyModule } from '../anomaly/anomaly.module.js';
 import { AcceptanceProfile } from '../database/entities/acceptance-profile.entity.js';
 import { Batch } from '../database/entities/batch.entity.js';
 import { LedgerEvent } from '../database/entities/ledger-event.entity.js';
@@ -15,9 +16,15 @@ import { TransferService } from './transfer.service.js';
   imports: [
     TypeOrmModule.forFeature([LedgerEvent, Batch, User, AcceptanceProfile]),
     ParameterModule,
+    AnomalyModule,
   ],
   controllers: [LedgerController],
-  providers: [LedgerService, LedgerEntryService, TransferService, LedgerVerifyService],
-  exports: [LedgerService, LedgerEntryService],
+  providers: [
+    LedgerService,
+    LedgerEntryService,
+    TransferService,
+    LedgerVerifyService,
+  ],
+  exports: [LedgerService, LedgerEntryService, LedgerVerifyService],
 })
 export class LedgerModule {}

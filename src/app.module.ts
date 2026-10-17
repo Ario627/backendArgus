@@ -11,10 +11,15 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor.
 import configuration, {
   type AppConfiguration,
 } from './config/configuration.js';
+import { AnomalyModule } from './anomaly/anomaly.module.js';
+import { AuditInterceptor } from './audit/audit.interceptor.js';
+import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BatchModule } from './batch/batch.module.js';
+import { ChainModule } from './chain/chain.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
 import { DatabaseModule } from './database/database.module.js';
+import { ExportModule } from './export/export.module.js';
 import { DeviceModule } from './device/device.module.js';
 import { FacilityModule } from './facility/facility.module.js';
 import { FleetModule } from './fleet/fleet.module.js';
@@ -22,10 +27,13 @@ import { HealthModule } from './health/health.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
 import { MenuModule } from './menu/menu.module.js';
 import { DispositionModule } from './disposition/disposition.module.js';
+import { OpsModule } from './ops/ops.module.js';
 import { PhotoModule } from './photo/photo.module.js';
+import { RetentionModule } from './retention/retention.module.js';
 import { RoutingModule } from './routing/routing.module.js';
 import { SppgModule } from './sppg/sppg.module.js';
 import { SyncModule } from './sync/sync.module.js';
+import { TicketModule } from './tickets/ticket.module.js';
 import { TelemetryModule } from './telemetry/telemetry.module.js';
 
 const THROTTLE_WINDOW_MS = 60000;
@@ -51,16 +59,23 @@ const THROTTLE_WINDOW_MS = 60000;
     }),
     ScheduleModule.forRoot(),
     DatabaseModule,
+    AuditModule,
     AuthModule,
     SppgModule,
     FacilityModule,
     LedgerModule,
+    ChainModule,
+    RetentionModule,
+    OpsModule,
     BatchModule,
     MenuModule,
     DeviceModule,
     FleetModule,
     TelemetryModule,
     RoutingModule,
+    TicketModule,
+    AnomalyModule,
+    ExportModule,
     SyncModule,
     DispositionModule,
     PhotoModule,
@@ -73,6 +88,7 @@ const THROTTLE_WINDOW_MS = 60000;
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
 })

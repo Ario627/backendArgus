@@ -116,10 +116,25 @@ export interface ChainConfig {
   readonly verifySamplePercent: number;
 }
 
+export interface RetentionConfig {
+  readonly compressAfterDays: number;
+  readonly dropAfterDays: number;
+  readonly photoTicketDays: number;
+  readonly photoBatchDays: number;
+  readonly maxPhotosPerRun: number;
+  readonly purgeEnabled: boolean;
+}
+
+export interface OpsConfig {
+  readonly webhookUrl: string | null;
+  readonly webhookTimeoutMs: number;
+}
+
 export interface ThrottleConfig {
   readonly globalPerMin: number;
   readonly ticketPerHour: number;
   readonly ticketPerDayPerSppg: number;
+  readonly exportPerDay: number;
 }
 
 export interface AppConfiguration {
@@ -147,6 +162,8 @@ export interface AppConfiguration {
   readonly route: RouteConfig;
   readonly disposition: DispositionConfig;
   readonly chain: ChainConfig;
+  readonly retention: RetentionConfig;
+  readonly ops: OpsConfig;
   readonly throttle: ThrottleConfig;
   readonly demoMode: boolean;
 }
@@ -279,6 +296,15 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
 
   if (isProduction && !mqttUrl.startsWith('mqtts://')) {
     fail('MQTT_URL', 'wajib memakai skema mqtts:// di produksi');
+  }
+
+  const opsWebhookUrl = reader.optionalText('OPS_WEBHOOK_URL');
+  if (opsWebhookUrl !== null) {
+    try {
+      new URL(opsWebhookUrl);
+    } catch {
+      fail('OPS_WEBHOOK_URL', 'harus URL absolut yang valid');
+    }
   }
 
   return Object.freeze({
@@ -491,6 +517,38 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
         100,
       ),
     }),
+    retention: Object.freeze({
+      compressAfterDays: reader.integer(
+        'TELEMETRY_COMPRESS_AFTER_DAYS',
+        7,
+        1,
+        365,
+      ),
+      dropAfterDays: reader.integer('TELEMETRY_DROP_AFTER_DAYS', 90, 1, 3650),
+      photoTicketDays: reader.integer(
+        'PHOTO_TICKET_RETENTION_DAYS',
+        366,
+        30,
+        3650,
+      ),
+      photoBatchDays: reader.integer(
+        'PHOTO_BATCH_RETENTION_DAYS',
+        731,
+        30,
+        3650,
+      ),
+      maxPhotosPerRun: reader.integer('PHOTO_PURGE_MAX_PER_RUN', 200, 1, 1000),
+      purgeEnabled: reader.boolean('RETENTION_PURGE_ENABLED', false),
+    }),
+    ops: Object.freeze({
+      webhookUrl: opsWebhookUrl,
+      webhookTimeoutMs: reader.integer(
+        'OPS_WEBHOOK_TIMEOUT_MS',
+        5000,
+        1000,
+        30000,
+      ),
+    }),
     throttle: Object.freeze({
       globalPerMin: reader.integer('THROTTLE_GLOBAL_PER_MIN', 100, 1, 100000),
       ticketPerHour: reader.integer('TICKET_RATE_PER_HOUR', 3, 1, 1000),
@@ -500,6 +558,7 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
         1,
         10000,
       ),
+      exportPerDay: reader.integer('EXPORT_RATE_PER_DAY', 10, 1, 1000),
     }),
     demoMode: reader.boolean('DEMO_MODE', false),
   });

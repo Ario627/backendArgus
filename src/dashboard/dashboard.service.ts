@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { jakartaDateOf, wibDayRangeUtc } from '../common/utils/daily-range.util.js';
+import {
+  jakartaDateOf,
+  wibDayRangeUtc,
+} from '../common/utils/daily-range.util.js';
+import type { AppConfiguration } from '../config/configuration.js';
 
 interface BatchAggregateRow {
   readonly total: string;
@@ -52,11 +57,19 @@ const toNumber = (value: string | number | null | undefined): number =>
 
 @Injectable()
 export class DashboardService {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  private readonly demoMode: boolean;
+
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    configService: ConfigService,
+  ) {
+    const config = configService.getOrThrow<AppConfiguration>('app');
+    this.demoMode = config.demoMode;
+  }
 
   async summary(scopeSppgId: string | null): Promise<DashboardSummary> {
     const range = wibDayRangeUtc(jakartaDateOf(new Date()));
-    const [batchRow] = (await this.dataSource.query(
+    const [batchRow] = await this.dataSource.query<BatchAggregateRow[]>(
       `SELECT COUNT(*) AS total,
               COALESCE(SUM(berat_kg), 0) AS total_kg,
               COUNT(*) FILTER (WHERE gate_status = 'LOLOS') AS gate_lolos,
@@ -70,26 +83,29 @@ export class DashboardService {
               COUNT(*) FILTER (WHERE status = 'MENUNGGU_ANGKUT' AND tingkat_putusan IS NULL) AS menunggu_putusan
          FROM batch
         WHERE dikeluarkan_at >= $1 AND dikeluarkan_at < $2
-          AND ($3::uuid IS NULL OR sppg_id = $3)`,
-      [range.start, range.end, scopeSppgId],
-    )) as BatchAggregateRow[];
+          AND ($3::uuid IS NULL OR sppg_id = $3)
+          AND ($4::bool IS TRUE OR is_demo = FALSE)`,
+      [range.start, range.end, scopeSppgId, this.demoMode],
+    );
 
-    const [anomaliRow] = (await this.dataSource.query(
+    const [anomaliRow] = await this.dataSource.query<CountRow[]>(
       `SELECT COUNT(*) AS total
          FROM anomali a
          JOIN batch b ON b.id = a.batch_id
         WHERE a.ditutup_at IS NULL
-          AND ($1::uuid IS NULL OR b.sppg_id = $1)`,
-      [scopeSppgId],
-    )) as CountRow[];
+          AND ($1::uuid IS NULL OR b.sppg_id = $1)
+          AND ($2::bool IS TRUE OR a.is_demo = FALSE)`,
+      [scopeSppgId, this.demoMode],
+    );
 
-    const [tiketRow] = (await this.dataSource.query(
+    const [tiketRow] = await this.dataSource.query<CountRow[]>(
       `SELECT COUNT(*) AS total
          FROM tiket_warga
         WHERE status = 'BARU'
-          AND ($1::uuid IS NULL OR sppg_id = $1)`,
-      [scopeSppgId],
-    )) as CountRow[];
+          AND ($1::uuid IS NULL OR sppg_id = $1)
+          AND ($2::bool IS TRUE OR is_demo = FALSE)`,
+      [scopeSppgId, this.demoMode],
+    );
 
     return Object.freeze({
       date: range.date,
