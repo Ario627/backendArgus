@@ -7,6 +7,8 @@ import { validationExceptionFactory } from '../common/pipes/validation-exception
 import type { AuthenticatedUser } from '../common/types.js';
 import { AppendEventDto } from '../ledger/dto/append-event.dto.js';
 import { LedgerEntryService } from '../ledger/ledger-entry.service.js';
+import { CreateObservationDto } from '../menu/dto/create-observation.dto.js';
+import { MenuService } from '../menu/menu.service.js';
 import {
   SUPPORTED_SYNC_ITEM_TYPES,
   type SyncBatchDto,
@@ -39,13 +41,18 @@ const validatePayload = async <T extends object>(
   payload: Record<string, unknown>,
 ): Promise<T> => {
   const instance = plainToInstance(cls, payload);
-  const errors = await validate(instance, { whitelist: true, forbidNonWhitelisted: true });
+  const errors = await validate(instance, {
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
   if (errors.length > 0) throw validationExceptionFactory(errors);
   return instance;
 };
 
 const readClientEventId = (payload: Record<string, unknown>): string | null =>
-  typeof payload['clientEventId'] === 'string' ? payload['clientEventId'] : null;
+  typeof payload['clientEventId'] === 'string'
+    ? payload['clientEventId']
+    : null;
 
 const toSyncErrors = (error: HttpException): readonly SyncErrorItem[] => {
   const response = error.getResponse();
@@ -81,9 +88,13 @@ export class SyncService {
   constructor(
     private readonly batchService: BatchService,
     private readonly entryService: LedgerEntryService,
+    private readonly menuService: MenuService,
   ) {}
 
-  async process(dto: SyncBatchDto, actor: AuthenticatedUser): Promise<SyncOutcome> {
+  async process(
+    dto: SyncBatchDto,
+    actor: AuthenticatedUser,
+  ): Promise<SyncOutcome> {
     const results: SyncResultItem[] = [];
     for (const item of dto.items) {
       results.push(await this.processItem(item, actor));
@@ -94,7 +105,10 @@ export class SyncService {
     };
   }
 
-  private async processItem(item: SyncItemDto, actor: AuthenticatedUser): Promise<SyncResultItem> {
+  private async processItem(
+    item: SyncItemDto,
+    actor: AuthenticatedUser,
+  ): Promise<SyncResultItem> {
     const clientEventId = readClientEventId(item.payload);
     if (!SUPPORTED_SYNC_ITEM_TYPES.includes(item.tipe)) {
       return {
@@ -117,6 +131,20 @@ export class SyncService {
         };
       }
 
+      if (item.tipe === 'observasi_sisa') {
+        const payload = await validatePayload(
+          CreateObservationDto,
+          item.payload,
+        );
+        const result = await this.menuService.createObservation(payload, actor);
+        return {
+          clientEventId: payload.clientEventId,
+          tipe: item.tipe,
+          status: result.duplicate ? 'DUPLIKAT' : 'DIBUAT',
+          resourceId: result.observation.id,
+        };
+      }
+
       if (item.batchId === undefined) {
         return {
           clientEventId,
@@ -126,7 +154,11 @@ export class SyncService {
         };
       }
       const payload = await validatePayload(AppendEventDto, item.payload);
-      const result = await this.entryService.appendEvent(item.batchId, payload, actor);
+      const result = await this.entryService.appendEvent(
+        item.batchId,
+        payload,
+        actor,
+      );
       return {
         clientEventId: payload.clientEventId,
         tipe: item.tipe,

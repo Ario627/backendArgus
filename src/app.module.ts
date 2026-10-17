@@ -8,13 +8,18 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { RolesGuard } from './common/guards/roles.guard.js';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor.js';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor.js';
-import configuration, { type AppConfiguration } from './config/configuration.js';
+import configuration, {
+  type AppConfiguration,
+} from './config/configuration.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BatchModule } from './batch/batch.module.js';
+import { DashboardModule } from './dashboard/dashboard.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { FacilityModule } from './facility/facility.module.js';
 import { HealthModule } from './health/health.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
+import { MenuModule } from './menu/menu.module.js';
+import { DispositionModule } from './disposition/disposition.module.js';
 import { PhotoModule } from './photo/photo.module.js';
 import { SppgModule } from './sppg/sppg.module.js';
 import { SyncModule } from './sync/sync.module.js';
@@ -34,7 +39,9 @@ const THROTTLE_WINDOW_MS = 60000;
       useFactory: (configService: ConfigService) => {
         const config = configService.getOrThrow<AppConfiguration>('app');
         return {
-          throttlers: [{ ttl: THROTTLE_WINDOW_MS, limit: config.throttle.globalPerMin }],
+          throttlers: [
+            { ttl: THROTTLE_WINDOW_MS, limit: config.throttle.globalPerMin },
+          ],
         };
       },
     }),
@@ -45,8 +52,11 @@ const THROTTLE_WINDOW_MS = 60000;
     FacilityModule,
     LedgerModule,
     BatchModule,
+    MenuModule,
     SyncModule,
+    DispositionModule,
     PhotoModule,
+    DashboardModule,
     HealthModule,
   ],
   providers: [

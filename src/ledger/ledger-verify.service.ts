@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
 import { batchNotFoundError } from '../batch/batch.errors.js';
+import { canReadBatch } from '../batch/batch-access.util.js';
 import type { AuthenticatedUser } from '../common/types.js';
 import { forbiddenActionError } from '../common/errors/http.errors.js';
 import { verifyChain } from '../common/utils/hash.util.js';
@@ -224,7 +225,7 @@ export class LedgerVerifyService {
   private async assertReadable(batchId: string, actor: AuthenticatedUser): Promise<void> {
     const batch = await this.batchRepository.findOne({ where: { id: batchId } });
     if (batch === null) throw batchNotFoundError();
-    if (actor.role === 'sppg_staff' && actor.sppgId !== batch.sppgId) {
+    if (!canReadBatch(actor, batch)) {
       throw forbiddenActionError();
     }
   }

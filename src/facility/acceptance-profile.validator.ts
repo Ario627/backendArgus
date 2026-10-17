@@ -1,4 +1,4 @@
-import { FRACTION_CODES, type FractionCode } from '../common/constant/domain.constant.js';
+import { FRACTION_CODES, WASTE_FLOWS, type FractionCode, type WasteFlow } from '../common/constant/domain.constant.js';
 import {
   VISIBLE_OIL_POLICIES,
   type AcceptanceProfileRules,
@@ -21,6 +21,9 @@ const PROFILE_KEYS = [
 
 const MOISTURE_FIELDS = ['passMin', 'passMax', 'fixAbove', 'rejectAbove'] as const;
 const CONTAMINANT_KEYS = ['plasticPercentMax', 'visibleOil'] as const;
+const OPTIONAL_PROFILE_KEYS = ['acceptsFlows'] as const;
+const ALL_PROFILE_KEYS = [...PROFILE_KEYS, ...OPTIONAL_PROFILE_KEYS] as const;
+const FLOW_SET: ReadonlySet<string> = new Set(WASTE_FLOWS);
 const OPERATING_HOURS_PATTERN = /^\d{2}:\d{2}-\d{2}:\d{2}$/;
 const FRACTION_CODE_SET: ReadonlySet<string> = new Set(FRACTION_CODES);
 const OIL_POLICY_SET: ReadonlySet<string> = new Set(VISIBLE_OIL_POLICIES);
@@ -190,6 +193,38 @@ const validateContaminant = (value: unknown, violations: ProfileViolation[]): Co
   return { plasticPercentMax, visibleOil: oilRaw };
 };
 
+const validateFlows = (
+  value: unknown,
+  violations: ProfileViolation[],
+): readonly WasteFlow[] | null => {
+  if (!Array.isArray(value) || value.length === 0) {
+    violations.push(
+      violation('FLOWS_INVALID', 'acceptsFlows', 'acceptsFlows harus berisi minimal satu aliran'),
+    );
+    return null;
+  }
+  const seen = new Set<string>();
+  const flows: WasteFlow[] = [];
+  let valid = true;
+  for (const entry of value) {
+    if (typeof entry !== 'string' || !FLOW_SET.has(entry)) {
+      violations.push(
+        violation('FLOWS_INVALID_CODE', 'acceptsFlows', `Aliran tidak dikenal: ${String(entry)}`),
+      );
+      valid = false;
+      continue;
+    }
+    if (seen.has(entry)) {
+      violations.push(violation('FLOWS_DUPLICATE', 'acceptsFlows', `Aliran ganda: ${entry}`));
+      valid = false;
+      continue;
+    }
+    seen.add(entry);
+    flows.push(entry as WasteFlow);
+  }
+  return valid ? flows : null;
+};
+
 const readNullablePositive = (
   source: Record<string, unknown>,
   key: string,
@@ -224,7 +259,7 @@ export const parseAcceptanceProfile = (value: unknown): ProfileParseResult => {
   }
 
   const violations: ProfileViolation[] = [];
-  for (const key of unknownKeysOf(value, PROFILE_KEYS)) {
+  for (const key of unknownKeysOf(value, ALL_PROFILE_KEYS)) {
     violations.push(violation('PROFILE_KEY_UNKNOWN', key, `Kunci tidak dikenal: ${key}`));
   }
   for (const key of PROFILE_KEYS) {
@@ -238,13 +273,14 @@ export const parseAcceptanceProfile = (value: unknown): ProfileParseResult => {
     : null;
   const moisture = hasOwn(value, 'moisture') ? validateMoisture(value.moisture, violations) : null;
   const contaminant = hasOwn(value, 'contaminant') ? validateContaminant(value.contaminant, violations) : null;
+  const acceptsFlows = hasOwn(value, 'acceptsFlows') ? validateFlows(value.acceptsFlows, violations) : (['organik'] as const);
   const maxAgeHours = readNullablePositive(value, 'maxAgeHours', 'MAX_AGE_INVALID', violations);
   const capacityKgPerDay = readNullablePositive(value, 'capacityKgPerDay', 'CAPACITY_INVALID', violations);
   const pricePerKg = readNullablePositive(value, 'pricePerKg', 'PRICE_INVALID', violations);
   const operatingHours = readOperatingHours(value, violations);
 
   if (violations.length > 0) return { ok: false, violations };
-  if (acceptsFractions === null || moisture === null || contaminant === null) {
+  if (acceptsFractions === null || moisture === null || contaminant === null || acceptsFlows === null) {
     return { ok: false, violations: [violation('PROFILE_INVALID', '', 'Profil penerimaan tidak lengkap')] };
   }
 
@@ -252,6 +288,7 @@ export const parseAcceptanceProfile = (value: unknown): ProfileParseResult => {
     ok: true,
     profile: Object.freeze({
       acceptsFractions: Object.freeze([...acceptsFractions]),
+      acceptsFlows: Object.freeze([...acceptsFlows]),
       moisture: Object.freeze({ ...moisture }),
       maxAgeHours,
       contaminant: Object.freeze({ ...contaminant }),

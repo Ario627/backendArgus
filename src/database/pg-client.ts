@@ -1,5 +1,8 @@
 import pg from 'pg';
 import type { DatabaseConfig } from '../config/configuration.js';
+import { registerPgTypeParsers } from './pg-type-parsers.js';
+
+registerPgTypeParsers();
 
 export const createPgClient = (
   database: DatabaseConfig,

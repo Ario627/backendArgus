@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { AppConfiguration } from '../config/configuration.js';
+import { registerPgTypeParsers } from './pg-type-parsers.js';
+
+registerPgTypeParsers();
 
 @Module({
   imports: [

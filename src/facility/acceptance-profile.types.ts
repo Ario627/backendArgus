@@ -1,4 +1,4 @@
-import type { FractionCode } from '../common/constant/domain.constant.js';
+import type { FractionCode, WasteFlow } from '../common/constant/domain.constant.js';
 
 export const VISIBLE_OIL_POLICIES = Object.freeze(['fix', 'reject', 'allow'] as const);
 export type VisibleOilPolicy = (typeof VISIBLE_OIL_POLICIES)[number];
@@ -17,6 +17,7 @@ export type ContaminantRules = {
 
 export type AcceptanceProfileRules = {
   readonly acceptsFractions: readonly FractionCode[];
+  readonly acceptsFlows: readonly WasteFlow[];
   readonly moisture: MoistureRules;
   readonly maxAgeHours: number | null;
   readonly contaminant: ContaminantRules;

@@ -5,6 +5,7 @@ import { describe, expect, it } from '@jest/globals';
 
 const CANONICAL_PROFILE = {
   acceptsFractions: ['A', 'B', 'C'],
+  acceptsFlows: ['organik'],
   moisture: { passMin: 45, passMax: 75, fixAbove: 75, rejectAbove: 80 },
   maxAgeHours: null,
   contaminant: { plasticPercentMax: 0, visibleOil: 'fix' },
@@ -30,6 +31,7 @@ describe('parseAcceptanceProfile', () => {
     expect(Object.isFrozen(result.profile.moisture)).toBe(true);
     expect(Object.isFrozen(result.profile.contaminant)).toBe(true);
     expect(Object.isFrozen(result.profile.acceptsFractions)).toBe(true);
+    expect(Object.isFrozen(result.profile.acceptsFlows)).toBe(true);
   });
 
   it('menolak nilai yang bukan objek', () => {
@@ -106,6 +108,27 @@ describe('parseAcceptanceProfile', () => {
     expect(rulesOf({ ...CANONICAL_PROFILE, operatingHours: '6:00-16:00' })).toEqual(['OPERATING_HOURS_FORMAT']);
     expect(rulesOf({ ...CANONICAL_PROFILE, operatingHours: 600 })).toEqual(['OPERATING_HOURS_FORMAT']);
     expect(rulesOf({ ...CANONICAL_PROFILE, operatingHours: null })).toEqual([]);
+  });
+
+  it('menerima acceptsFlows eksplisit dan menolak nilainya bila tidak sah', () => {
+    const duaAliran = { ...CANONICAL_PROFILE, acceptsFlows: ['organik', 'minyak'] };
+    const ok = parseAcceptanceProfile(duaAliran);
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) return;
+    expect(ok.profile.acceptsFlows).toEqual(['organik', 'minyak']);
+
+    expect(rulesOf({ ...CANONICAL_PROFILE, acceptsFlows: [] })).toEqual(['FLOWS_INVALID']);
+    expect(rulesOf({ ...CANONICAL_PROFILE, acceptsFlows: 'organik' })).toEqual(['FLOWS_INVALID']);
+    expect(rulesOf({ ...CANONICAL_PROFILE, acceptsFlows: ['organik', 'air'] })).toEqual(['FLOWS_INVALID_CODE']);
+    expect(rulesOf({ ...CANONICAL_PROFILE, acceptsFlows: ['organik', 'organik'] })).toEqual(['FLOWS_DUPLICATE']);
+  });
+
+  it('memberi default organik saja bila acceptsFlows tidak dikirim', () => {
+    const { acceptsFlows: _ignored, ...withoutFlows } = CANONICAL_PROFILE;
+    const result = parseAcceptanceProfile(withoutFlows);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profile.acceptsFlows).toEqual(['organik']);
   });
 
   it('mengumpulkan banyak pelanggaran sekaligus', () => {

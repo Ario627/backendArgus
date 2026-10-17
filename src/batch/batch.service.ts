@@ -6,6 +6,7 @@ import { assertTransition, BATCH_STATUS_TRANSITIONS } from '../common/constant/t
 import type { AuthenticatedUser, ApiErrorDetail, PaginatedItems } from '../common/types.js';
 import { forbiddenActionError } from '../common/errors/http.errors.js';
 import { generateId } from '../common/utils/id.util.js';
+import { canReadBatch } from './batch-access.util.js';
 import { BatchFraction } from '../database/entities/batch-fraction.entity.js';
 import { Batch } from '../database/entities/batch.entity.js';
 import { Sppg } from '../database/entities/sppg.entity.js';
@@ -201,7 +202,7 @@ export class BatchService {
   async getDetail(id: string, actor: AuthenticatedUser): Promise<BatchDetailDto> {
     const batch = await this.batchRepository.findOne({ where: { id } });
     if (batch === null) throw batchNotFoundError();
-    if (actor.role === 'sppg_staff' && actor.sppgId !== batch.sppgId) {
+    if (!canReadBatch(actor, batch)) {
       throw forbiddenActionError();
     }
     return this.composeDetail(this.batchRepository.manager, id);
