@@ -24,6 +24,9 @@ export class User {
   @Column({ type: 'uuid', name: 'fasilitas_id', nullable: true })
   facilityId!: string | null;
 
+  @Column({ type: 'uuid', name: 'fleet_id', nullable: true })
+  fleetId!: string | null;
+
   @Column({ type: 'boolean', default: true })
   aktif!: boolean;
 

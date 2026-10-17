@@ -39,6 +39,10 @@ export interface MqttConfig {
   readonly clientId: string;
   readonly username: string;
   readonly password: string;
+  readonly reconnectPeriodMs: number;
+  readonly connectTimeoutMs: number;
+  readonly sessionExpirySeconds: number;
+  readonly caPath: string | null;
   readonly scaleTimeSkewSeconds: number;
 }
 
@@ -63,6 +67,13 @@ export interface LivenessConfig {
   readonly staleThresholdSeconds: number;
   readonly offlineThresholdSeconds: number;
   readonly watchdogIntervalSeconds: number;
+}
+
+export interface TelemetryConfig {
+  readonly maxAgeSeconds: number;
+  readonly futureSkewSeconds: number;
+  readonly burstLimit: number;
+  readonly refillPerSecond: number;
 }
 
 export interface DispositionConfig {
@@ -100,6 +111,7 @@ export interface AppConfiguration {
   readonly analytics: ExternalServiceConfig;
   readonly llm: LlmConfig;
   readonly liveness: LivenessConfig;
+  readonly telemetry: TelemetryConfig;
   readonly disposition: DispositionConfig;
   readonly chain: ChainConfig;
   readonly throttle: ThrottleConfig;
@@ -257,6 +269,10 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
       clientId: reader.text('MQTT_CLIENT_ID', 'argus-backend'),
       username: reader.text('MQTT_USERNAME', 'argus-backend'),
       password: reader.secret('MQTT_PASSWORD', 8, 'argus-dev-mqtt'),
+      reconnectPeriodMs: reader.integer('MQTT_RECONNECT_PERIOD_MS', 5000, 1000, 60000),
+      connectTimeoutMs: reader.integer('MQTT_CONNECT_TIMEOUT_MS', 10000, 3000, 60000),
+      sessionExpirySeconds: reader.integer('MQTT_SESSION_EXPIRY_SECONDS', 604800, 60, 2678400),
+      caPath: reader.optionalText('MQTT_CA_PATH'),
       scaleTimeSkewSeconds: reader.integer('SCALE_TIME_SKEW_SECONDS', 120, 30, 3600),
     }),
     mapbox: Object.freeze({
@@ -281,6 +297,12 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
       staleThresholdSeconds: reader.integer('STALE_THRESHOLD_SECONDS', 180, 30, 3600),
       offlineThresholdSeconds: reader.integer('OFFLINE_THRESHOLD_SECONDS', 600, 60, 86400),
       watchdogIntervalSeconds: reader.integer('WATCHDOG_INTERVAL_SECONDS', 60, 10, 600),
+    }),
+    telemetry: Object.freeze({
+      maxAgeSeconds: reader.integer('TELEMETRY_MAX_AGE_SECONDS', 604800, 60, 2592000),
+      futureSkewSeconds: reader.integer('TELEMETRY_FUTURE_SKEW_SECONDS', 300, 30, 3600),
+      burstLimit: reader.integer('TELEMETRY_BURST_LIMIT', 600, 10, 100000),
+      refillPerSecond: reader.integer('TELEMETRY_REFILL_PER_SECOND', 2, 1, 1000),
     }),
     disposition: Object.freeze({
       candidateRadiusKm: reader.integer('CANDIDATE_RADIUS_KM', 25, 1, 200),

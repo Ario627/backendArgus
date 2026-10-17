@@ -14,6 +14,7 @@ export interface AuthenticatedUser {
   readonly role: UserRole;
   readonly sppgId: string | null;
   readonly facilityId: string | null;
+  readonly fleetId: string | null;
 }
 
 export interface PaginationQuery {

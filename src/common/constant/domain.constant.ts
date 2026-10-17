@@ -138,6 +138,15 @@ export type PhotoMimeType = (typeof PHOTO_MIME_TYPES)[number];
 export const PHOTO_REF_TYPES = Object.freeze(['batch', 'ledger_event', 'tiket', 'lainnya'] as const);
 export type PhotoRefType = (typeof PHOTO_REF_TYPES)[number];
 
+export const FLEET_STATUSES = Object.freeze(['ONLINE_NORMAL', 'ONLINE_BROKEN', 'STALE', 'OFFLINE'] as const);
+export type FleetStatus = (typeof FLEET_STATUSES)[number];
+
+export const HARDWARE_STATUSES = Object.freeze(['normal', 'broken'] as const);
+export type HardwareStatus = (typeof HARDWARE_STATUSES)[number];
+
+export const DEVICE_TYPES = Object.freeze(['tracker', 'timbangan'] as const);
+export type DeviceType = (typeof DEVICE_TYPES)[number];
+
 export const BATCH_WEIGHT_LIMITS = Object.freeze({
   minKg: 0.1,
   maxKg: 500,

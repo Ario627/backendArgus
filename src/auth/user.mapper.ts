@@ -8,6 +8,7 @@ export interface UserProfile {
   readonly role: UserRole;
   readonly sppgId: string | null;
   readonly facilityId: string | null;
+  readonly fleetId: string | null;
 }
 
 export const toUserProfile = (user: User): UserProfile => ({
@@ -17,4 +18,5 @@ export const toUserProfile = (user: User): UserProfile => ({
   role: user.role,
   sppgId: user.sppgId,
   facilityId: user.facilityId,
+  fleetId: user.fleetId,
 });

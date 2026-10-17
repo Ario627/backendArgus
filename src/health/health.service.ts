@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { MqttClientService } from '../mqtt/mqtt-client.service.js';
 
 const DB_PROBE_TIMEOUT_MS = 2000;
 
@@ -32,14 +33,17 @@ const withTimeout = <T>(operation: Promise<T>, timeoutMs: number): Promise<T> =>
 
 @Injectable()
 export class HealthService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly mqttClient: MqttClientService,
+  ) {}
 
   async probe(): Promise<HealthReport> {
     const db = await this.probeDatabase();
     return {
       status: db ? 'ok' : 'degraded',
       db,
-      mqtt: 'unknown',
+      mqtt: this.mqttClient.isConnected() ? 'ok' : 'down',
       optimizer: 'unknown',
       uptimeSeconds: Math.floor(process.uptime()),
     };

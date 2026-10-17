@@ -1,10 +1,8 @@
 import { HttpException, Injectable, Logger } from '@nestjs/common';
-import { plainToInstance } from 'class-transformer';
-import { validate } from 'class-validator';
 import { BatchService } from '../batch/batch.service.js';
 import { CreateBatchDto } from '../batch/dto/create-batch.dto.js';
-import { validationExceptionFactory } from '../common/pipes/validation-exception.factory.js';
 import type { AuthenticatedUser } from '../common/types.js';
+import { validatePayload } from '../common/utils/payload-validation.util.js';
 import { AppendEventDto } from '../ledger/dto/append-event.dto.js';
 import { LedgerEntryService } from '../ledger/ledger-entry.service.js';
 import { CreateObservationDto } from '../menu/dto/create-observation.dto.js';
@@ -35,19 +33,6 @@ export interface SyncOutcome {
   readonly results: readonly SyncResultItem[];
   readonly partiallyFailed: boolean;
 }
-
-const validatePayload = async <T extends object>(
-  cls: new () => T,
-  payload: Record<string, unknown>,
-): Promise<T> => {
-  const instance = plainToInstance(cls, payload);
-  const errors = await validate(instance, {
-    whitelist: true,
-    forbidNonWhitelisted: true,
-  });
-  if (errors.length > 0) throw validationExceptionFactory(errors);
-  return instance;
-};
 
 const readClientEventId = (payload: Record<string, unknown>): string | null =>
   typeof payload['clientEventId'] === 'string'

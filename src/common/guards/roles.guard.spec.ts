@@ -11,6 +11,7 @@ const buildUser = (role: UserRole): AuthenticatedUser => ({
   role,
   sppgId: null,
   facilityId: null,
+  fleetId: null,
 });
 
 const buildContext = (user?: AuthenticatedUser): ExecutionContext =>

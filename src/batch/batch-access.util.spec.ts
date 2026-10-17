@@ -8,6 +8,7 @@ const actor = (overrides: Partial<AuthenticatedUser>): AuthenticatedUser => ({
   role: 'sppg_staff',
   sppgId: null,
   facilityId: null,
+  fleetId: null,
   ...overrides,
 });
 
