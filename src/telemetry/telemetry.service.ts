@@ -1,14 +1,14 @@
-import {
-  HttpException,
-  Injectable,
-  Logger,
-  OnApplicationBootstrap,
-} from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { HardwareStatus } from '../common/constant/domain.constant.js';
-import { validatePayload } from '../common/utils/payload-validation.util.js';
+import { DropThrottle } from '../common/utils/drop-throttle.util.js';
+import { parseJsonObject } from '../common/utils/json-object.util.js';
+import {
+  validatePayload,
+  validationCodesOf,
+} from '../common/utils/payload-validation.util.js';
 import type {
   AppConfiguration,
   TelemetryConfig,
@@ -26,7 +26,6 @@ import { TelemetryRateLimiter } from './telemetry-rate-limiter.util.js';
 const TRACKER_TOPIC_FILTER = 'fleet/+/telemetry';
 const MAX_PAYLOAD_BYTES = 4096;
 const DROP_LOG_INTERVAL_MS = 30000;
-const MAX_DROP_LOG_KEYS = 4096;
 
 const INGEST_SQL = `
 WITH ins AS (
@@ -61,43 +60,12 @@ interface TrackerReading {
   readonly deviceTimestampIso: string;
 }
 
-const readJsonObject = (payload: Buffer): Record<string, unknown> | null => {
-  try {
-    const parsed: unknown = JSON.parse(payload.toString('utf8'));
-    if (
-      parsed === null ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed)
-    ) {
-      return null;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-};
-
-const extractValidationCodes = (error: unknown): readonly string[] => {
-  if (!(error instanceof HttpException)) return ['SYSTEM'];
-  const response = error.getResponse();
-  if (response === null || typeof response !== 'object') return ['INVALID'];
-  const details = (response as { details?: unknown }).details;
-  if (!Array.isArray(details)) return ['INVALID'];
-  const codes = new Set<string>();
-  for (const entry of details) {
-    if (entry === null || typeof entry !== 'object') continue;
-    const code = (entry as { code?: unknown }).code;
-    if (typeof code === 'string') codes.add(code);
-  }
-  return codes.size > 0 ? Object.freeze([...codes]) : ['INVALID'];
-};
-
 @Injectable()
 export class TelemetryService implements OnApplicationBootstrap {
   private readonly logger = new Logger(TelemetryService.name);
   private readonly telemetryConfig: TelemetryConfig;
   private readonly limiter: TelemetryRateLimiter;
-  private readonly dropLogAt = new Map<string, number>();
+  private readonly throttle = new DropThrottle(DROP_LOG_INTERVAL_MS);
 
   constructor(
     configService: ConfigService,
@@ -124,14 +92,8 @@ export class TelemetryService implements OnApplicationBootstrap {
     reason: TelemetryDropReason,
     nowMs: number,
   ): void {
-    if (reason === 'RATE_LIMITED') {
-      const lastLoggedAt = this.dropLogAt.get(key) ?? 0;
-      if (nowMs - lastLoggedAt < DROP_LOG_INTERVAL_MS) return;
-      if (this.dropLogAt.size >= MAX_DROP_LOG_KEYS) {
-        const oldest = this.dropLogAt.keys().next().value;
-        if (oldest !== undefined) this.dropLogAt.delete(oldest);
-      }
-      this.dropLogAt.set(key, nowMs);
+    if (reason === 'RATE_LIMITED' && !this.throttle.shouldLog(key, nowMs)) {
+      return;
     }
     this.logger.warn(`telemetri dibuang kunci=${key} alasan=${reason}`);
   }
@@ -158,7 +120,7 @@ export class TelemetryService implements OnApplicationBootstrap {
       return;
     }
     const fleetIdFromTopic = parseTrackerTopic(topic);
-    const body = readJsonObject(payload);
+    const body = parseJsonObject(payload);
     if (body === null) {
       this.logger.warn(`telemetri dibuang topik=${topic} alasan=BUKAN_JSON`);
       return;
@@ -167,7 +129,7 @@ export class TelemetryService implements OnApplicationBootstrap {
     try {
       dto = await validatePayload(TrackerTelemetryDto, body);
     } catch (error) {
-      const codes = extractValidationCodes(error).join(',');
+      const codes = validationCodesOf(error).join(',');
       this.logger.warn(
         `telemetri dibuang topik=${topic} alasan=BENTUK_INVALID kode=${codes}`,
       );

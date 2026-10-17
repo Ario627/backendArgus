@@ -1,7 +1,16 @@
 import { registerAs } from '@nestjs/config';
 
-export const NODE_ENVIRONMENTS = Object.freeze(['development', 'test', 'production'] as const);
-export const LOG_LEVELS = Object.freeze(['debug', 'info', 'warn', 'error'] as const);
+export const NODE_ENVIRONMENTS = Object.freeze([
+  'development',
+  'test',
+  'production',
+] as const);
+export const LOG_LEVELS = Object.freeze([
+  'debug',
+  'info',
+  'warn',
+  'error',
+] as const);
 
 export type NodeEnvironment = (typeof NODE_ENVIRONMENTS)[number];
 export type LogLevel = (typeof LOG_LEVELS)[number];
@@ -56,6 +65,13 @@ export interface ExternalServiceConfig {
   readonly timeoutMs: number;
 }
 
+export interface OptimizerConfig {
+  readonly url: string;
+  readonly timeoutMs: number;
+  readonly recoveryTimeoutMs: number;
+  readonly recoveryTargetMs: number;
+}
+
 export interface LlmConfig {
   readonly provider: string | null;
   readonly apiKey: string | null;
@@ -74,6 +90,21 @@ export interface TelemetryConfig {
   readonly futureSkewSeconds: number;
   readonly burstLimit: number;
   readonly refillPerSecond: number;
+}
+
+export interface DeviceConfig {
+  readonly secretEncKey: string;
+  readonly autoLinkWindowSeconds: number;
+  readonly pendingMaxAgeHours: number;
+  readonly sweepIntervalSeconds: number;
+}
+
+export interface RouteConfig {
+  readonly windowStart: string;
+  readonly windowEnd: string;
+  readonly timeLimitSeconds: number;
+  readonly fallbackSpeedKmh: number;
+  readonly recoveryIntervalSeconds: number;
 }
 
 export interface DispositionConfig {
@@ -107,11 +138,13 @@ export interface AppConfiguration {
   readonly auth: AuthConfig;
   readonly mqtt: MqttConfig;
   readonly mapbox: MapboxConfig;
-  readonly optimizer: ExternalServiceConfig;
+  readonly optimizer: OptimizerConfig;
   readonly analytics: ExternalServiceConfig;
   readonly llm: LlmConfig;
   readonly liveness: LivenessConfig;
   readonly telemetry: TelemetryConfig;
+  readonly device: DeviceConfig;
+  readonly route: RouteConfig;
   readonly disposition: DispositionConfig;
   readonly chain: ChainConfig;
   readonly throttle: ThrottleConfig;
@@ -149,7 +182,11 @@ const createReaders = ({ env, strict }: ReaderContext) => {
 
   const optionalText = (key: string): string | null => readRaw(env, key);
 
-  const secret = (key: string, minLength: number, devFallback: string): string => {
+  const secret = (
+    key: string,
+    minLength: number,
+    devFallback: string,
+  ): string => {
     const raw = readRaw(env, key);
     if (raw === null) {
       return strict ? fail(key, 'wajib diisi di produksi') : devFallback;
@@ -170,7 +207,12 @@ const createReaders = ({ env, strict }: ReaderContext) => {
     }
   };
 
-  const integer = (key: string, fallback: number, min: number, max: number): number => {
+  const integer = (
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number => {
     const raw = readRaw(env, key);
     if (raw === null) {
       return fallback;
@@ -199,7 +241,11 @@ const createReaders = ({ env, strict }: ReaderContext) => {
     return fail(key, 'harus "true" atau "false"');
   };
 
-  const enumeration = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
+  const enumeration = <T extends string>(
+    key: string,
+    allowed: readonly T[],
+    fallback: T,
+  ): T => {
     const raw = readRaw(env, key);
     if (raw === null) {
       return fallback;
@@ -213,9 +259,20 @@ const createReaders = ({ env, strict }: ReaderContext) => {
   return { text, optionalText, secret, url, integer, boolean, enumeration };
 };
 
+const CLOCK_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 export const buildConfiguration = (env: RawEnv): AppConfiguration => {
   const baseReader = createReaders({ env, strict: false });
-  const nodeEnv = baseReader.enumeration('NODE_ENV', NODE_ENVIRONMENTS, 'development');
+  const readClock = (key: string, fallback: string): string => {
+    const raw = readRaw(env, key) ?? fallback;
+    if (!CLOCK_PATTERN.test(raw)) return fail(key, 'harus format HH:MM');
+    return raw;
+  };
+  const nodeEnv = baseReader.enumeration(
+    'NODE_ENV',
+    NODE_ENVIRONMENTS,
+    'development',
+  );
   const isProduction = nodeEnv === 'production';
   const reader = createReaders({ env, strict: isProduction });
   const mqttUrl = reader.text('MQTT_URL', 'mqtt://localhost:1883');
@@ -231,7 +288,12 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
     frontendUrl: reader.url('FRONTEND_URL', 'http://localhost:5173'),
     publicAppUrl: reader.url('PUBLIC_APP_URL', 'http://localhost:5173'),
     requestTimeoutMs: reader.integer('REQUEST_TIMEOUT_MS', 15000, 1000, 120000),
-    requestMaxBodyBytes: reader.integer('REQUEST_MAX_BODY_BYTES', 262144, 1024, 10485760),
+    requestMaxBodyBytes: reader.integer(
+      'REQUEST_MAX_BODY_BYTES',
+      262144,
+      1024,
+      10485760,
+    ),
     trustProxyHops: reader.integer('TRUST_PROXY_HOPS', 0, 0, 10),
     logLevel: reader.enumeration('LOG_LEVEL', LOG_LEVELS, 'info'),
     logRetentionDays: reader.integer('LOG_RETENTION_DAYS', 90, 1, 3650),
@@ -251,7 +313,12 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
       accessKey: reader.secret('S3_ACCESS_KEY', 8, 'argus-minio-access'),
       secretKey: reader.secret('S3_SECRET_KEY', 8, 'argus-minio-secret'),
       region: reader.text('S3_REGION', 'us-east-1'),
-      signedUrlTtlSeconds: reader.integer('PHOTO_SIGNED_URL_TTL_SECONDS', 900, 60, 3600),
+      signedUrlTtlSeconds: reader.integer(
+        'PHOTO_SIGNED_URL_TTL_SECONDS',
+        900,
+        60,
+        3600,
+      ),
       photoMaxBytes: reader.integer('PHOTO_MAX_BYTES', 1048576, 1024, 10485760),
     }),
     auth: Object.freeze({
@@ -262,18 +329,42 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
       ),
       jwtExpiresIn: reader.text('JWT_EXPIRES_IN', '8h'),
       bcryptRounds: reader.integer('BCRYPT_ROUNDS', 12, 10, 15),
-      ipHashSalt: reader.secret('IP_HASH_SALT', 32, 'dev-only-ip-hash-salt-0123456789abcdef'),
+      ipHashSalt: reader.secret(
+        'IP_HASH_SALT',
+        32,
+        'dev-only-ip-hash-salt-0123456789abcdef',
+      ),
     }),
     mqtt: Object.freeze({
       url: mqttUrl,
       clientId: reader.text('MQTT_CLIENT_ID', 'argus-backend'),
       username: reader.text('MQTT_USERNAME', 'argus-backend'),
       password: reader.secret('MQTT_PASSWORD', 8, 'argus-dev-mqtt'),
-      reconnectPeriodMs: reader.integer('MQTT_RECONNECT_PERIOD_MS', 5000, 1000, 60000),
-      connectTimeoutMs: reader.integer('MQTT_CONNECT_TIMEOUT_MS', 10000, 3000, 60000),
-      sessionExpirySeconds: reader.integer('MQTT_SESSION_EXPIRY_SECONDS', 604800, 60, 2678400),
+      reconnectPeriodMs: reader.integer(
+        'MQTT_RECONNECT_PERIOD_MS',
+        5000,
+        1000,
+        60000,
+      ),
+      connectTimeoutMs: reader.integer(
+        'MQTT_CONNECT_TIMEOUT_MS',
+        10000,
+        3000,
+        60000,
+      ),
+      sessionExpirySeconds: reader.integer(
+        'MQTT_SESSION_EXPIRY_SECONDS',
+        604800,
+        60,
+        2678400,
+      ),
       caPath: reader.optionalText('MQTT_CA_PATH'),
-      scaleTimeSkewSeconds: reader.integer('SCALE_TIME_SKEW_SECONDS', 120, 30, 3600),
+      scaleTimeSkewSeconds: reader.integer(
+        'SCALE_TIME_SKEW_SECONDS',
+        120,
+        30,
+        3600,
+      ),
     }),
     mapbox: Object.freeze({
       token: reader.optionalText('MAPBOX_TOKEN'),
@@ -282,6 +373,18 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
     optimizer: Object.freeze({
       url: reader.url('OPTIMIZER_URL', 'http://localhost:8100'),
       timeoutMs: reader.integer('OPTIMIZER_TIMEOUT_MS', 12000, 1000, 120000),
+      recoveryTimeoutMs: reader.integer(
+        'SWARM_RECOVERY_OPT_TIMEOUT_MS',
+        15000,
+        1000,
+        120000,
+      ),
+      recoveryTargetMs: reader.integer(
+        'SWARM_RECOVERY_TARGET_MS',
+        60000,
+        5000,
+        600000,
+      ),
     }),
     analytics: Object.freeze({
       url: reader.url('ANALYTICS_URL', 'http://localhost:8200'),
@@ -294,27 +397,109 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
       timeoutMs: reader.integer('LLM_TIMEOUT_MS', 15000, 1000, 120000),
     }),
     liveness: Object.freeze({
-      staleThresholdSeconds: reader.integer('STALE_THRESHOLD_SECONDS', 180, 30, 3600),
-      offlineThresholdSeconds: reader.integer('OFFLINE_THRESHOLD_SECONDS', 600, 60, 86400),
-      watchdogIntervalSeconds: reader.integer('WATCHDOG_INTERVAL_SECONDS', 60, 10, 600),
+      staleThresholdSeconds: reader.integer(
+        'STALE_THRESHOLD_SECONDS',
+        180,
+        30,
+        3600,
+      ),
+      offlineThresholdSeconds: reader.integer(
+        'OFFLINE_THRESHOLD_SECONDS',
+        600,
+        60,
+        86400,
+      ),
+      watchdogIntervalSeconds: reader.integer(
+        'WATCHDOG_INTERVAL_SECONDS',
+        60,
+        10,
+        600,
+      ),
     }),
     telemetry: Object.freeze({
-      maxAgeSeconds: reader.integer('TELEMETRY_MAX_AGE_SECONDS', 604800, 60, 2592000),
-      futureSkewSeconds: reader.integer('TELEMETRY_FUTURE_SKEW_SECONDS', 300, 30, 3600),
+      maxAgeSeconds: reader.integer(
+        'TELEMETRY_MAX_AGE_SECONDS',
+        604800,
+        60,
+        2592000,
+      ),
+      futureSkewSeconds: reader.integer(
+        'TELEMETRY_FUTURE_SKEW_SECONDS',
+        300,
+        30,
+        3600,
+      ),
       burstLimit: reader.integer('TELEMETRY_BURST_LIMIT', 600, 10, 100000),
-      refillPerSecond: reader.integer('TELEMETRY_REFILL_PER_SECOND', 2, 1, 1000),
+      refillPerSecond: reader.integer(
+        'TELEMETRY_REFILL_PER_SECOND',
+        2,
+        1,
+        1000,
+      ),
+    }),
+    route: Object.freeze({
+      windowStart: readClock('ROUTE_WINDOW_START', '09:00'),
+      windowEnd: readClock('ROUTE_WINDOW_END', '15:00'),
+      timeLimitSeconds: reader.integer('ROUTE_TIME_LIMIT_SECONDS', 10, 1, 120),
+      fallbackSpeedKmh: reader.integer('ROUTE_FALLBACK_SPEED_KMH', 25, 5, 80),
+      recoveryIntervalSeconds: reader.integer(
+        'ROUTE_RECOVERY_INTERVAL_SECONDS',
+        30,
+        10,
+        3600,
+      ),
+    }),
+    device: Object.freeze({
+      secretEncKey: reader.secret(
+        'DEVICE_SECRET_ENC_KEY',
+        64,
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      ),
+      autoLinkWindowSeconds: reader.integer(
+        'SCALE_AUTO_LINK_WINDOW_SECONDS',
+        120,
+        30,
+        600,
+      ),
+      pendingMaxAgeHours: reader.integer(
+        'SCALE_PENDING_MAX_AGE_HOURS',
+        24,
+        1,
+        168,
+      ),
+      sweepIntervalSeconds: reader.integer(
+        'SCALE_SWEEP_INTERVAL_SECONDS',
+        300,
+        30,
+        3600,
+      ),
     }),
     disposition: Object.freeze({
       candidateRadiusKm: reader.integer('CANDIDATE_RADIUS_KM', 25, 1, 200),
     }),
     chain: Object.freeze({
-      verifyDailyBatches: reader.integer('CHAIN_VERIFY_DAILY_BATCHES', 100, 1, 10000),
-      verifySamplePercent: reader.integer('CHAIN_VERIFY_SAMPLE_PERCENT', 5, 1, 100),
+      verifyDailyBatches: reader.integer(
+        'CHAIN_VERIFY_DAILY_BATCHES',
+        100,
+        1,
+        10000,
+      ),
+      verifySamplePercent: reader.integer(
+        'CHAIN_VERIFY_SAMPLE_PERCENT',
+        5,
+        1,
+        100,
+      ),
     }),
     throttle: Object.freeze({
       globalPerMin: reader.integer('THROTTLE_GLOBAL_PER_MIN', 100, 1, 100000),
       ticketPerHour: reader.integer('TICKET_RATE_PER_HOUR', 3, 1, 1000),
-      ticketPerDayPerSppg: reader.integer('TICKET_RATE_PER_DAY_PER_SPPG', 20, 1, 10000),
+      ticketPerDayPerSppg: reader.integer(
+        'TICKET_RATE_PER_DAY_PER_SPPG',
+        20,
+        1,
+        10000,
+      ),
     }),
     demoMode: reader.boolean('DEMO_MODE', false),
   });
