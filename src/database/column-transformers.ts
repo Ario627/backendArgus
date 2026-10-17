@@ -6,3 +6,8 @@ export const decimalTransformer: ValueTransformer = {
   from: (value: string | number | null): number | null =>
     value === null ? null : Number(value),
 };
+
+export const bigintTransformer: ValueTransformer = {
+  to: (value: number): number => value,
+  from: (value: string | number): number => Number(value),
+};

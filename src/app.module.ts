@@ -10,9 +10,11 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor.js
 import { ResponseInterceptor } from './common/interceptors/response.interceptor.js';
 import configuration, { type AppConfiguration } from './config/configuration.js';
 import { AuthModule } from './auth/auth.module.js';
+import { BatchModule } from './batch/batch.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { FacilityModule } from './facility/facility.module.js';
 import { HealthModule } from './health/health.module.js';
+import { LedgerModule } from './ledger/ledger.module.js';
 import { SppgModule } from './sppg/sppg.module.js';
 
 const THROTTLE_WINDOW_MS = 60000;
@@ -39,6 +41,8 @@ const THROTTLE_WINDOW_MS = 60000;
     AuthModule,
     SppgModule,
     FacilityModule,
+    LedgerModule,
+    BatchModule,
     HealthModule,
   ],
   providers: [
