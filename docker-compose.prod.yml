@@ -2,7 +2,7 @@ version: '3.9'
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: timescale/timescaledb:2.30.2-pg16
     container_name: argus-postgres-prod
     restart: always
     ports:
@@ -14,8 +14,6 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     volumes:
       - postgres_data_prod:/var/lib/postgresql/data
-      - ./scripts/init-timescaledb.sql:/docker-entrypoint-initdb.d/01-timescaledb.sql
-      - ./src/database/migrations:/docker-entrypoint-initdb.d/02-migrations
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-argus} -d ${DB_NAME:-argus}"]
       interval: 10s

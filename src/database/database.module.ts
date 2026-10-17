@@ -1,43 +1,34 @@
 import { Module } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { FleetEntity } from './entities/fleet.entity';
-import { DestinationEntity } from './entities/destination.entity';
-import { TelemetryEntity } from './entities/telemetry.entity';
-import { RoutePlanEntity } from './entities/route-plan.entity';
-import { RecoveryLogEntity } from './entities/recovery-log.entity';
-import { UserEntity } from './entities/user.entity';
-import { DeviceEntity } from './entities/device.entity';
-import { ProvisioningTokenEntity } from './entities/provisioning-token.entity';
-
-const ENTITIES = [
-  FleetEntity,
-  DestinationEntity,
-  TelemetryEntity,
-  RoutePlanEntity,
-  RecoveryLogEntity,
-  UserEntity,
-  DeviceEntity,
-  ProvisioningTokenEntity,
-];
+import type { AppConfiguration } from '../config/configuration.js';
 
 @Module({
-    imports: [
-        TypeOrmModule.forRootAsync({
-            inject: [ConfigService],
-            useFactory: (config: ConfigService) => {
-                const db = config.get<{url: string; poolSize: number}>('app.database')!;
-                return {
-                    type: 'postgres',
-                    url: db?.url,
-                    entities: ENTITIES,
-                    synchronize: false,
-                    extra: {poolSize: db?.poolSize}
-                };
-            },
-        }),
-        TypeOrmModule.forFeature(ENTITIES),
-    ],
-    exports: [TypeOrmModule],
+  imports: [
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const config = configService.getOrThrow<AppConfiguration>('app');
+        return {
+          type: 'postgres' as const,
+          host: config.database.host,
+          port: config.database.port,
+          database: config.database.name,
+          username: config.database.user,
+          password: config.database.password,
+          ssl: config.database.ssl ? { rejectUnauthorized: true } : false,
+          poolSize: config.database.poolSize,
+          applicationName: 'argus-backend',
+          autoLoadEntities: true,
+          synchronize: false,
+          migrationsRun: false,
+          retryAttempts: 10,
+          retryDelay: 3000,
+        };
+      },
+    }),
+  ],
+  exports: [TypeOrmModule],
 })
 export class DatabaseModule {}

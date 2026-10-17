@@ -1,40 +1,22 @@
-import { Controller, Get } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
-import { Public } from 'src/common/decorators/roles.decorator';
-import { RawResponse } from 'src/common/decorators/raw-response.decorator';
-
-interface HealthResponse {
-  status: 'ok' | 'degraded';
-  db: boolean;
-  mqtt: boolean;
-  timestamp: string;
-}
+import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { Public } from '../common/decorators/public.decorator.js';
+import { RawResponse } from '../common/decorators/raw-response.decorator.js';
+import { HealthService, type HealthReport } from './health.service.js';
 
 @Controller('health')
 export class HealthController {
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(private readonly healthService: HealthService) {}
 
+  @Get()
   @Public()
   @RawResponse()
-  @Get()
-  async check(): Promise<HealthResponse> {
-    const db = await this.checkDb();
-    const mqtt = true;
-    return {
-      status: db && mqtt ? 'ok' : 'degraded',
-      db,
-      mqtt,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  private async checkDb(): Promise<boolean> {
-    try {
-      await this.dataSource.query('SELECT 1');
-      return true;
-    } catch {
-      return false;
+  async check(@Res({ passthrough: true }) response: Response): Promise<HealthReport> {
+    const report = await this.healthService.probe();
+    response.setHeader('Cache-Control', 'no-store');
+    if (report.status !== 'ok') {
+      response.status(HttpStatus.SERVICE_UNAVAILABLE);
     }
+    return report;
   }
 }

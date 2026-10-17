@@ -1,35 +1,32 @@
-import type { UserRole } from "src/common/types";
-import { FleetEntity } from "./fleet.entity";
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, PrimaryColumn } from 'typeorm';
+import type { UserRole } from '../../common/constant/domain.constant.js';
 
-@Entity('user')
-export class UserEntity {
-  @PrimaryGeneratedColumn('uuid')
+@Entity({ name: 'user' })
+export class User {
+  @PrimaryColumn({ type: 'uuid' })
   id!: string;
 
-  @Column({ type: 'varchar', unique: true })
+  @Column({ type: 'text', unique: true })
   username!: string;
 
-  @Column({ name: 'password_hash', type: 'varchar', select: false })
+  @Column({ type: 'text', name: 'password_hash', select: false })
   passwordHash!: string;
 
-  @Column({ type: 'varchar' })
+  @Column({ type: 'text' })
+  nama!: string;
+
+  @Column({ type: 'text' })
   role!: UserRole;
 
-  @Column({ type: 'varchar', name: 'fleet_id', nullable: true })
-  fleetId!: string | null;
+  @Column({ type: 'uuid', name: 'sppg_id', nullable: true })
+  sppgId!: string | null;
 
-  @ManyToOne(() => FleetEntity, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'fleet_id', referencedColumnName: 'id' })
-  fleet!: FleetEntity | null;
+  @Column({ type: 'uuid', name: 'fasilitas_id', nullable: true })
+  facilityId!: string | null;
 
-  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  @Column({ type: 'boolean', default: true })
+  aktif!: boolean;
+
+  @Column({ type: 'timestamptz', name: 'created_at', default: () => 'now()' })
   createdAt!: Date;
 }

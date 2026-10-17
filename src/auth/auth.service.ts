@@ -1,62 +1,70 @@
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
-import { Injectable, UnauthorizedException } from "@nestjs/common";
-import { JwtService } from "@nestjs/jwt";
-import * as bcrypt from "bcrypt";
-import { UserEntity } from "src/database/entities/user.entity";
-import { LoginDto } from "./dto/login.dto";
-import { JwtPayload } from "src/common/types";
-import { RegisterDto } from "./dto/register.dto";
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { InjectRepository } from '@nestjs/typeorm';
+import bcrypt from 'bcrypt';
+import { Repository } from 'typeorm';
+import type { JwtPayload } from '../common/types.js';
+import type { AppConfiguration } from '../config/configuration.js';
+import { User } from '../database/entities/user.entity.js';
+import { expiredSessionError, invalidCredentialsError } from './auth.errors.js';
+import type { LoginDto } from './dto/login.dto.js';
+import { toUserProfile, type UserProfile } from './user.mapper.js';
 
-const BCRYPT_ROUNDS = 10;
+export interface LoginResult {
+  readonly accessToken: string;
+  readonly user: UserProfile;
+}
 
 @Injectable()
 export class AuthService {
-    constructor(
-        @InjectRepository(UserEntity)
-        private readonly userRepo: Repository<UserEntity>,
-        private readonly jwtService: JwtService,
-    ) {}
+  private readonly logger = new Logger(AuthService.name);
+  private readonly dummyHash: string;
 
-    async login(dto: LoginDto): Promise<{accessToken: string}> {
-        const user = await this.userRepo.findOne({
-          where: { username: dto.username },
-          select: {
-            id: true,
-            username: true,
-            passwordHash: true,
-            role: true,
-            fleetId: true,
-          },
-        });
+  constructor(
+    private readonly jwtService: JwtService,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
+    configService: ConfigService,
+  ) {
+    const config = configService.getOrThrow<AppConfiguration>('app');
+    this.dummyHash = bcrypt.hashSync(
+      'argus-dummy-password-for-timing',
+      config.auth.bcryptRounds,
+    );
+  }
 
-        if(!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
-            throw new UnauthorizedException('Invalid username or password');
-        }
+  async login(dto: LoginDto): Promise<LoginResult> {
+    const user = await this.userRepository
+      .createQueryBuilder('u')
+      .addSelect('u.passwordHash')
+      .where('u.username = :username', { username: dto.username })
+      .getOne();
 
-        return {accessToken: this.signJwt(user)};
+    const passwordOk = await bcrypt.compare(
+      dto.password,
+      user?.passwordHash ?? this.dummyHash,
+    );
+    if (user === null || !user.aktif || !passwordOk) {
+      this.logger.warn(`login ditolak untuk username=${dto.username}`);
+      throw invalidCredentialsError();
     }
 
-    async register(dto: RegisterDto): Promise<{accessToken: string}> {
-        const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
-        const user = this.userRepo.create({
-            username: dto.username,
-            passwordHash,
-            role: dto.role,
-            fleetId: dto.fleetId ?? null,
-        });
+    const payload: JwtPayload = {
+      sub: user.id,
+      username: user.username,
+      role: user.role,
+      sppgId: user.sppgId,
+      facilityId: user.facilityId,
+    };
+    return {
+      accessToken: await this.jwtService.signAsync(payload),
+      user: toUserProfile(user),
+    };
+  }
 
-        await this.userRepo.save(user);
-        return {accessToken: this.signJwt(user)};
-    }
-
-    private signJwt(user: Pick<UserEntity, 'id' | 'username' | 'role' | 'fleetId'>): string {
-        const payload: JwtPayload = {
-            sub: user.id,
-            username: user.username,
-            role: user.role,
-            fleetId: user.fleetId
-        };
-        return this.jwtService.sign(payload);
-    }
+  async me(userId: string): Promise<UserProfile> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (user === null || !user.aktif) throw expiredSessionError();
+    return toUserProfile(user);
+  }
 }

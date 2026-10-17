@@ -3,151 +3,168 @@ import {
   Catch,
   ExceptionFilter,
   HttpException,
-  HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import type { ApiErrorDetail } from '../types.js';
 
-const ERROR_CODES: ReadonlyMap<number, string> = new Map([
-  [400, 'BAD_REQUEST'],
-  [401, 'UNAUTHORIZED'],
-  [403, 'FORBIDDEN'],
-  [404, 'NOT_FOUND'],
-  [409, 'CONFLICT'],
-  [429, 'RATE_LIMITED'],
-  [500, 'INTERNAL_ERROR'],
-  [503, 'SERVICE_UNAVAILABLE'],
+const MAX_DETAILS = 20;
+const MAX_CODE_LENGTH = 64;
+const MAX_MESSAGE_LENGTH = 240;
+const MAX_PATH_LENGTH = 240;
+const MAX_FIELD_LENGTH = 64;
+
+const STATUS_CODES: Readonly<Record<number, string>> = Object.freeze({
+  400: 'SYS_BAD_REQUEST',
+  401: 'AUTH_EXPIRED',
+  403: 'RBAC_FORBIDDEN',
+  404: 'SYS_NOT_FOUND',
+  409: 'SYS_CONFLICT',
+  413: 'PHOTO_TOO_LARGE',
+  422: 'SYS_VALIDATION',
+  429: 'RATE_LIMITED',
+  500: 'SYS_INTERNAL',
+  503: 'SYS_UNAVAILABLE',
+});
+
+const STATUS_MESSAGES: Readonly<Record<number, string>> = Object.freeze({
+  400: 'Permintaan tidak valid',
+  401: 'Sesi berakhir, silakan masuk kembali',
+  403: 'Anda tidak punya akses untuk tindakan ini',
+  404: 'Data tidak ditemukan',
+  409: 'Permintaan bertentangan dengan kondisi data saat ini',
+  413: 'Berkas terlalu besar',
+  422: 'Data yang dikirim tidak valid',
+  429: 'Terlalu banyak permintaan',
+  500: 'Terjadi kesalahan internal',
+  503: 'Layanan sedang tidak tersedia',
+});
+
+interface NormalizedError {
+  readonly status: number;
+  readonly code: string;
+  readonly message: string;
+  readonly details?: readonly ApiErrorDetail[];
+}
+
+const clamp = (value: string, maxLength: number): string =>
+  value.length <= maxLength ? value : value.slice(0, maxLength);
+
+const normalizeStatus = (status: number): number =>
+  Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
+
+const fallbackCode = (status: number): string =>
+  STATUS_CODES[status] ?? (status >= 500 ? STATUS_CODES[500] : STATUS_CODES[400]);
+
+const fallbackMessage = (status: number): string =>
+  STATUS_MESSAGES[status] ?? (status >= 500 ? STATUS_MESSAGES[500] : STATUS_MESSAGES[400]);
+
+const NEST_ROUTE_MESSAGE = /^Cannot (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) /;
+const EXCEPTION_CLASS_PREFIX = /^[A-Za-z]+Exception: /;
+
+const FRAMEWORK_DEFAULT_MESSAGES: ReadonlySet<string> = new Set([
+  'Unauthorized',
+  'Forbidden resource',
+  'Forbidden',
 ]);
 
-interface ErrorBody {
-  success: false;
-  error: { code: string; message: string; details?: unknown };
-  timestamp: string;
-  path: string;
-}
+const resolveMessage = (status: number, raw: string): string => {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return fallbackMessage(status);
+  if (FRAMEWORK_DEFAULT_MESSAGES.has(trimmed)) return fallbackMessage(status);
+  if (NEST_ROUTE_MESSAGE.test(trimmed)) return fallbackMessage(status);
+  if (EXCEPTION_CLASS_PREFIX.test(trimmed)) return fallbackMessage(status);
+  return clamp(trimmed, MAX_MESSAGE_LENGTH);
+};
+
+const normalizeFieldName = (value: string): string =>
+  value.replace(/[^A-Za-z0-9_.-]/g, '').slice(0, MAX_FIELD_LENGTH);
+
+const sanitizeDetails = (value: unknown): readonly ApiErrorDetail[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const details: ApiErrorDetail[] = [];
+  for (const entry of value) {
+    if (details.length >= MAX_DETAILS) break;
+    if (entry === null || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record.code !== 'string') continue;
+    const code = clamp(record.code, MAX_CODE_LENGTH);
+    const field = typeof record.field === 'string' ? normalizeFieldName(record.field) : '';
+    const key = `${code}|${field}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    details.push(field.length > 0 ? { code, field } : { code });
+  }
+  return details.length > 0 ? Object.freeze(details) : undefined;
+};
+
+const normalizeHttpException = (exception: HttpException): NormalizedError => {
+  const status = normalizeStatus(exception.getStatus());
+  const payload = exception.getResponse();
+  if (typeof payload === 'string') {
+    return { status, code: fallbackCode(status), message: resolveMessage(status, payload) };
+  }
+  if (payload !== null && typeof payload === 'object') {
+    const record = payload as Record<string, unknown>;
+    const code =
+      typeof record.code === 'string' ? clamp(record.code, MAX_CODE_LENGTH) : fallbackCode(status);
+    const message =
+      typeof record.message === 'string'
+        ? resolveMessage(status, record.message)
+        : fallbackMessage(status);
+    const details = sanitizeDetails(record.details);
+    return details === undefined ? { status, code, message } : { status, code, message, details };
+  }
+  return { status, code: fallbackCode(status), message: fallbackMessage(status) };
+};
+
+const normalizeException = (exception: unknown): NormalizedError => {
+  if (exception instanceof HttpException) return normalizeHttpException(exception);
+  return { status: 500, code: STATUS_CODES[500], message: STATUS_MESSAGES[500] };
+};
+
+const describeForLog = (exception: unknown): string =>
+  exception instanceof Error ? clamp(exception.message, MAX_MESSAGE_LENGTH) : 'non-error thrown';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
-  private readonly isProduction: boolean;
-
-  constructor(configService: ConfigService) {
-    this.isProduction =
-      configService.get<string>('app.nodeEnv') === 'production';
-  }
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    // ── Non-HTTP contexts (e.g. MQTT/RPC) — log & rethrow, don't send HTTP response ──
     if (host.getType() !== 'http') {
-      const msg = exception instanceof Error ? exception.message : String(exception);
-      this.logger.error(`[RPC] ${msg}`);
-      if (exception instanceof Error) {
-        this.logger.error(exception.stack);
-      }
+      this.logger.error(describeForLog(exception), exception instanceof Error ? exception.stack : undefined);
       throw exception;
     }
 
-    const ctx = host.switchToHttp();
-    const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
+    const http = host.switchToHttp();
+    const request = http.getRequest<Request>();
+    const response = http.getResponse<Response>();
 
-    const { status, code, message, details } = this.resolve(exception);
+    if (response.headersSent) return;
 
-    const body: ErrorBody = {
-      success: false,
-      error: { code, message },
+    const normalized = normalizeException(exception);
+    this.logIfNeeded(request, normalized, exception);
+
+    response.status(normalized.status).json({
+      success: false as const,
+      error:
+        normalized.details === undefined
+          ? { code: normalized.code, message: normalized.message }
+          : { code: normalized.code, message: normalized.message, details: normalized.details },
       timestamp: new Date().toISOString(),
-      path: request.url,
-    };
-
-    if (!this.isProduction && details !== undefined) {
-      body.error.details = details;
-    }
-
-    if (status >= 500) this.logServerError(exception, request, status);
-
-    response.status(status).json(body);
+      path: clamp(request.originalUrl.split('?')[0], MAX_PATH_LENGTH),
+    });
   }
 
-  private resolve(exception: unknown): {
-    status: number;
-    code: string;
-    message: string;
-    details?: unknown;
-  } {
-    if (exception instanceof HttpException) {
-      return this.fromHttpException(exception);
+  private logIfNeeded(request: Request, normalized: NormalizedError, exception: unknown): void {
+    const line = `${request.method} ${request.path} ${normalized.status} ${normalized.code}`;
+    if (normalized.status >= 500) {
+      this.logger.error(line, exception instanceof Error ? exception.stack : undefined);
+      return;
     }
-    if (exception instanceof Error) {
-      return {
-        status: HttpStatus.INTERNAL_SERVER_ERROR,
-        code: 'INTERNAL_ERROR',
-        message: this.isProduction
-          ? 'Internal server error'
-          : exception.message,
-      };
-    }
-    return {
-      status: HttpStatus.INTERNAL_SERVER_ERROR,
-      code: 'INTERNAL_ERROR',
-      message: 'Unknown error (non-Error throw)',
-    };
-  }
-
-  private fromHttpException(exception: HttpException): {
-    status: number;
-    code: string;
-    message: string;
-    details?: unknown;
-  } {
-    const status = exception.getStatus();
-    const res = exception.getResponse();
-
-    if (typeof res === 'string') {
-      return { status, code: this.codeOf(status), message: res };
-    }
-
-    if (res && typeof res === 'object') {
-      const obj = res as Record<string, unknown>;
-      const rawMsg = obj.message;
-      const message =
-        typeof rawMsg === 'string'
-          ? rawMsg
-          : Array.isArray(rawMsg)
-            ? (rawMsg as string[]).join(', ')
-            : exception.message;
-      return {
-        status,
-        code: typeof obj.code === 'string' ? obj.code : this.codeOf(status),
-        message,
-        details: obj.details,
-      };
-    }
-
-    return {
-      status,
-      code: this.codeOf(status),
-      message: exception.message,
-    };
-  }
-
-  private codeOf(status: number): string {
-    return ERROR_CODES.get(status) ?? 'ERROR';
-  }
-
-  private logServerError(
-    exception: unknown,
-    request: Request,
-    status: number,
-  ): void {
-    const meta =
-      `${request.method} ${request.url} ${status} ` +
-      (exception instanceof Error ? exception.message : 'non-Error throw');
-    if (exception instanceof Error) {
-      this.logger.error(meta, exception.stack);
-    } else {
-      this.logger.error(meta);
+    if (normalized.status === 429 || normalized.status === 413) {
+      this.logger.warn(line);
     }
   }
 }

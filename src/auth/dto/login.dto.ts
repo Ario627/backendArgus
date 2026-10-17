@@ -1,11 +1,17 @@
-import { IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsString, Length, Matches } from 'class-validator';
+
+const normalizeUsername = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string' ? value.trim().toLowerCase() : value;
 
 export class LoginDto {
+  @Transform(normalizeUsername)
   @IsString()
-  @IsNotEmpty()
+  @Length(3, 32)
+  @Matches(/^[a-z0-9._-]+$/)
   readonly username!: string;
 
   @IsString()
-  @MinLength(8)
+  @Length(1, 72)
   readonly password!: string;
 }
