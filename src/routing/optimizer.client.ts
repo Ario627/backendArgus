@@ -14,11 +14,13 @@ const MAX_RESPONSE_BYTES = 1048576;
 export class OptimizerClient {
   private readonly logger = new Logger(OptimizerClient.name);
   private readonly baseUrl: string;
+  private readonly token: string;
   private readonly timeoutMs: number;
 
   constructor(configService: ConfigService) {
     const config = configService.getOrThrow<AppConfiguration>('app');
     this.baseUrl = config.optimizer.url;
+    this.token = config.optimizer.token;
     this.timeoutMs = config.optimizer.timeoutMs;
   }
 
@@ -38,7 +40,13 @@ export class OptimizerClient {
           signal: controller.signal,
           maxContentLength: MAX_RESPONSE_BYTES,
           maxBodyLength: MAX_RESPONSE_BYTES,
-          headers: { 'content-type': 'application/json' },
+          headers:
+            this.token === ''
+              ? { 'content-type': 'application/json' }
+              : {
+                  'content-type': 'application/json',
+                  'x-internal-token': this.token,
+                },
         },
       );
       const parsed = parseOptimizerResponse(response.data);

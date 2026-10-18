@@ -12,6 +12,7 @@ import configuration, {
   type AppConfiguration,
 } from './config/configuration.js';
 import { AnomalyModule } from './anomaly/anomaly.module.js';
+import { AnalyticsModule } from './analytics/analytics.module.js';
 import { AuditInterceptor } from './audit/audit.interceptor.js';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -32,6 +33,7 @@ import { PhotoModule } from './photo/photo.module.js';
 import { RetentionModule } from './retention/retention.module.js';
 import { RoutingModule } from './routing/routing.module.js';
 import { SppgModule } from './sppg/sppg.module.js';
+import { StrukModule } from './struk/struk.module.js';
 import { SyncModule } from './sync/sync.module.js';
 import { TicketModule } from './tickets/ticket.module.js';
 import { TelemetryModule } from './telemetry/telemetry.module.js';
@@ -74,7 +76,9 @@ const THROTTLE_WINDOW_MS = 60000;
     TelemetryModule,
     RoutingModule,
     TicketModule,
+    StrukModule,
     AnomalyModule,
+    AnalyticsModule,
     ExportModule,
     SyncModule,
     DispositionModule,

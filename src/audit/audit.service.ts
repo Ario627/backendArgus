@@ -17,7 +17,7 @@ export const EXPORT_AUDIT_ACTION = 'export.batches';
 
 const EXPORT_QUOTA_WINDOW_HOURS = 24;
 
-const CONSUME_EXPORT_QUOTA_SQL = `
+const CONSUME_QUOTA_SQL = `
 WITH lock AS (
   SELECT pg_advisory_xact_lock(hashtext($2), hashtext($1::text)) AS taken
 ), recent AS (
@@ -25,10 +25,10 @@ WITH lock AS (
     FROM audit_log a, lock
    WHERE a.aktor = $1::uuid
      AND a.aksi = $2
-     AND a.ts > now() - make_interval(hours => ${EXPORT_QUOTA_WINDOW_HOURS})
+     AND a.ts > now() - make_interval(hours => $7::int)
 ), inserted AS (
   INSERT INTO audit_log (aktor, aktor_peran, aksi, entitas, entitas_id, detail, request_id)
-  SELECT $1::uuid, $3, $2, 'export', NULL, $4::jsonb, $5
+  SELECT $1::uuid, $3, $2, $8, NULL, $4::jsonb, $5
     FROM recent
    WHERE recent.terpakai < $6
   RETURNING id
@@ -78,6 +78,17 @@ export interface ExportQuotaInput {
   readonly requestId: string | null;
 }
 
+export interface QuotaInput {
+  readonly aktor: string;
+  readonly aktorPeran: UserRole;
+  readonly aksi: string;
+  readonly limitPerDay: number;
+  readonly windowHours: number;
+  readonly entitas: string;
+  readonly detail: Record<string, unknown>;
+  readonly requestId: string | null;
+}
+
 export interface ExportQuotaResult {
   readonly allowed: boolean;
   readonly used: number;
@@ -123,15 +134,30 @@ export class AuditService {
   async consumeExportQuota(
     input: ExportQuotaInput,
   ): Promise<ExportQuotaResult> {
+    return this.consumeQuota({
+      aktor: input.aktor,
+      aktorPeran: input.aktorPeran,
+      aksi: EXPORT_AUDIT_ACTION,
+      limitPerDay: input.limitPerDay,
+      windowHours: EXPORT_QUOTA_WINDOW_HOURS,
+      entitas: 'export',
+      detail: input.detail,
+      requestId: input.requestId,
+    });
+  }
+
+  async consumeQuota(input: QuotaInput): Promise<ExportQuotaResult> {
     const rows = await this.repository.manager.query<QuotaRow[]>(
-      CONSUME_EXPORT_QUOTA_SQL,
+      CONSUME_QUOTA_SQL,
       [
         input.aktor,
-        EXPORT_AUDIT_ACTION,
+        input.aksi,
         input.aktorPeran,
         JSON.stringify(input.detail),
         input.requestId,
         input.limitPerDay,
+        input.windowHours,
+        input.entitas,
       ],
     );
     const row = rows[0];

@@ -65,8 +65,19 @@ export interface ExternalServiceConfig {
   readonly timeoutMs: number;
 }
 
+export interface AnalyticsConfig {
+  readonly url: string;
+  readonly token: string;
+  readonly timeoutMs: number;
+  readonly lookbackDays: number;
+  readonly maxSppgPerScan: number;
+  readonly sampleSize: number;
+  readonly sampleMin: number;
+}
+
 export interface OptimizerConfig {
   readonly url: string;
+  readonly token: string;
   readonly timeoutMs: number;
   readonly recoveryTimeoutMs: number;
   readonly recoveryTargetMs: number;
@@ -76,7 +87,20 @@ export interface LlmConfig {
   readonly provider: string | null;
   readonly apiKey: string | null;
   readonly model: string | null;
+  readonly baseUrl: string | null;
+  readonly maxOutputTokens: number;
   readonly timeoutMs: number;
+}
+
+export interface NarrativeConfig {
+  readonly ttlMinutes: number;
+  readonly dailyLimit: number;
+  readonly maxChars: number;
+  readonly retryAfterSeconds: number;
+}
+
+export interface ExportConfig {
+  readonly pdfMaxRows: number;
 }
 
 export interface LivenessConfig {
@@ -128,6 +152,12 @@ export interface RetentionConfig {
 export interface OpsConfig {
   readonly webhookUrl: string | null;
   readonly webhookTimeoutMs: number;
+  readonly alertCooldownSeconds: number;
+}
+
+export interface StrukConfig {
+  readonly tokenSecret: string;
+  readonly ttlHours: number;
 }
 
 export interface ThrottleConfig {
@@ -154,7 +184,7 @@ export interface AppConfiguration {
   readonly mqtt: MqttConfig;
   readonly mapbox: MapboxConfig;
   readonly optimizer: OptimizerConfig;
-  readonly analytics: ExternalServiceConfig;
+  readonly analytics: AnalyticsConfig;
   readonly llm: LlmConfig;
   readonly liveness: LivenessConfig;
   readonly telemetry: TelemetryConfig;
@@ -164,6 +194,9 @@ export interface AppConfiguration {
   readonly chain: ChainConfig;
   readonly retention: RetentionConfig;
   readonly ops: OpsConfig;
+  readonly struk: StrukConfig;
+  readonly narrative: NarrativeConfig;
+  readonly export: ExportConfig;
   readonly throttle: ThrottleConfig;
   readonly demoMode: boolean;
 }
@@ -306,6 +339,23 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
       fail('OPS_WEBHOOK_URL', 'harus URL absolut yang valid');
     }
   }
+  const llmBaseUrl = reader.optionalText('LLM_BASE_URL');
+  if (llmBaseUrl !== null) {
+    try {
+      const parsed = new URL(llmBaseUrl);
+      if (parsed.search !== '' || parsed.hash !== '') {
+        fail('LLM_BASE_URL', 'tidak boleh memuat query atau fragmen');
+      }
+      if (isProduction && parsed.protocol !== 'https:') {
+        fail('LLM_BASE_URL', 'wajib memakai skema https di produksi');
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('ENV_INVALID')) {
+        throw error;
+      }
+      fail('LLM_BASE_URL', 'harus URL absolut yang valid');
+    }
+  }
 
   return Object.freeze({
     nodeEnv,
@@ -398,6 +448,7 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
     }),
     optimizer: Object.freeze({
       url: reader.url('OPTIMIZER_URL', 'http://localhost:8100'),
+      token: reader.secret('OPTIMIZER_TOKEN', 32, ''),
       timeoutMs: reader.integer('OPTIMIZER_TIMEOUT_MS', 12000, 1000, 120000),
       recoveryTimeoutMs: reader.integer(
         'SWARM_RECOVERY_OPT_TIMEOUT_MS',
@@ -414,12 +465,19 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
     }),
     analytics: Object.freeze({
       url: reader.url('ANALYTICS_URL', 'http://localhost:8200'),
+      token: reader.secret('ANALYTICS_TOKEN', 32, ''),
       timeoutMs: reader.integer('ANALYTICS_TIMEOUT_MS', 10000, 1000, 120000),
+      lookbackDays: reader.integer('DIGIT_LOOKBACK_DAYS', 90, 7, 365),
+      maxSppgPerScan: reader.integer('DIGIT_MAX_SPPG_PER_SCAN', 20, 1, 200),
+      sampleSize: reader.integer('DIGIT_SAMPLE_SIZE', 30, 1, 500),
+      sampleMin: reader.integer('DIGIT_SAMPLE_MIN', 30, 1, 500),
     }),
     llm: Object.freeze({
       provider: reader.optionalText('LLM_PROVIDER'),
       apiKey: reader.optionalText('LLM_API_KEY'),
       model: reader.optionalText('LLM_MODEL'),
+      baseUrl: llmBaseUrl,
+      maxOutputTokens: reader.integer('LLM_MAX_OUTPUT_TOKENS', 320, 64, 2000),
       timeoutMs: reader.integer('LLM_TIMEOUT_MS', 15000, 1000, 120000),
     }),
     liveness: Object.freeze({
@@ -542,12 +600,40 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
     }),
     ops: Object.freeze({
       webhookUrl: opsWebhookUrl,
+      alertCooldownSeconds: reader.integer(
+        'OPS_ALERT_COOLDOWN_SECONDS',
+        900,
+        0,
+        86400,
+      ),
       webhookTimeoutMs: reader.integer(
         'OPS_WEBHOOK_TIMEOUT_MS',
         5000,
         1000,
         30000,
       ),
+    }),
+    narrative: Object.freeze({
+      ttlMinutes: reader.integer('NARRATIVE_TTL_MINUTES', 360, 5, 10080),
+      dailyLimit: reader.integer('NARRATIVE_DAILY_LIMIT', 40, 1, 1000),
+      maxChars: reader.integer('NARRATIVE_MAX_CHARS', 700, 200, 2000),
+      retryAfterSeconds: reader.integer(
+        'NARRATIVE_RETRY_AFTER_SECONDS',
+        3,
+        1,
+        30,
+      ),
+    }),
+    export: Object.freeze({
+      pdfMaxRows: reader.integer('EXPORT_PDF_MAX_ROWS', 2000, 1, 20000),
+    }),
+    struk: Object.freeze({
+      tokenSecret: reader.secret(
+        'STRUK_TOKEN_SECRET',
+        32,
+        'dev-only-struk-token-secret-0123456789',
+      ),
+      ttlHours: reader.integer('STRUK_TOKEN_TTL_HOURS', 720, 1, 8760),
     }),
     throttle: Object.freeze({
       globalPerMin: reader.integer('THROTTLE_GLOBAL_PER_MIN', 100, 1, 100000),

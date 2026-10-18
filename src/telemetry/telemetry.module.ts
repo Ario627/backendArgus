@@ -8,6 +8,7 @@ import { TelemetryRow } from '../database/entities/telemetry-row.entity.js';
 import { DeviceModule } from '../device/device.module.js';
 import { LedgerModule } from '../ledger/ledger.module.js';
 import { MqttModule } from '../mqtt/mqtt.module.js';
+import { OpsModule } from '../ops/ops.module.js';
 import { FleetWatchdogService } from './fleet-watchdog.service.js';
 import { ScaleController } from './scale.controller.js';
 import { ScalePendingService } from './scale-pending.service.js';
@@ -28,6 +29,7 @@ import { TelemetryService } from './telemetry.service.js';
     MqttModule,
     DeviceModule,
     LedgerModule,
+    OpsModule,
   ],
   controllers: [TelemetryController, ScaleController],
   providers: [

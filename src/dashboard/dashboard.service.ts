@@ -7,6 +7,7 @@ import {
   wibDayRangeUtc,
 } from '../common/utils/daily-range.util.js';
 import type { AppConfiguration } from '../config/configuration.js';
+import type { NarrativeAnomalyFact, NarrativeFacts } from '../llm/llm.types.js';
 
 interface BatchAggregateRow {
   readonly total: string;
@@ -52,8 +53,74 @@ export interface DashboardSummary {
   };
 }
 
+interface NarrativeBatchRow {
+  readonly total: number;
+  readonly total_kg: string;
+  readonly gate_lolos: number;
+  readonly gate_perbaiki: number;
+  readonly gate_alihkan: number;
+  readonly gate_tolak: number;
+  readonly menunggu_putusan: number;
+  readonly prev_total: number;
+  readonly prev_kg: string;
+}
+
+interface NarrativeAnomalyRow {
+  readonly jenis: NarrativeAnomalyFact['jenis'];
+  readonly tingkat: NarrativeAnomalyFact['tingkat'];
+  readonly jumlah: number;
+}
+
+const NARRATIVE_BATCH_SQL = `
+SELECT COUNT(*) FILTER (WHERE dikeluarkan_at >= $1)::int AS total,
+       COALESCE(SUM(berat_kg) FILTER (WHERE dikeluarkan_at >= $1), 0) AS total_kg,
+       COUNT(*) FILTER (
+         WHERE dikeluarkan_at >= $1 AND gate_status = 'LOLOS'
+       )::int AS gate_lolos,
+       COUNT(*) FILTER (
+         WHERE dikeluarkan_at >= $1 AND gate_status = 'PERBAIKI'
+       )::int AS gate_perbaiki,
+       COUNT(*) FILTER (
+         WHERE dikeluarkan_at >= $1 AND gate_status = 'ALIHKAN'
+       )::int AS gate_alihkan,
+       COUNT(*) FILTER (
+         WHERE dikeluarkan_at >= $1 AND gate_status = 'TOLAK'
+       )::int AS gate_tolak,
+       COUNT(*) FILTER (
+         WHERE dikeluarkan_at >= $1
+           AND status = 'MENUNGGU_ANGKUT'
+           AND tingkat_putusan IS NULL
+       )::int AS menunggu_putusan,
+       COUNT(*) FILTER (WHERE dikeluarkan_at < $1)::int AS prev_total,
+       COALESCE(SUM(berat_kg) FILTER (WHERE dikeluarkan_at < $1), 0) AS prev_kg
+  FROM batch
+ WHERE dikeluarkan_at >= $2
+   AND dikeluarkan_at < $3
+   AND ($4::uuid IS NULL OR sppg_id = $4)
+   AND ($5::bool IS TRUE OR is_demo = FALSE)`;
+
+const NARRATIVE_ANOMALY_SQL = `
+SELECT a.jenis, a.tingkat, count(*)::int AS jumlah
+  FROM anomali a
+  JOIN batch b ON b.id = a.batch_id
+ WHERE a.ditutup_at IS NULL
+   AND ($1::uuid IS NULL OR b.sppg_id = $1)
+   AND ($2::bool IS TRUE OR a.is_demo = FALSE)
+ GROUP BY a.jenis, a.tingkat
+ ORDER BY jumlah DESC, a.jenis ASC
+ LIMIT 5`;
+
+const NARRATIVE_TICKET_SQL = `
+SELECT count(*)::int AS total
+  FROM tiket_warga
+ WHERE status = 'BARU'
+   AND ($1::uuid IS NULL OR sppg_id = $1)
+   AND ($2::bool IS TRUE OR is_demo = FALSE)`;
+
 const toNumber = (value: string | number | null | undefined): number =>
   value === null || value === undefined ? 0 : Number(value);
+
+const roundKg = (value: number): number => Math.round(value * 100) / 100;
 
 @Injectable()
 export class DashboardService {
@@ -65,6 +132,53 @@ export class DashboardService {
   ) {
     const config = configService.getOrThrow<AppConfiguration>('app');
     this.demoMode = config.demoMode;
+  }
+
+  async narrativeFacts(scopeSppgId: string | null): Promise<NarrativeFacts> {
+    const today = wibDayRangeUtc(jakartaDateOf(new Date()));
+    const yesterdayStart = new Date(today.start.getTime() - 86400000);
+    const [batchRow] = await this.dataSource.query<NarrativeBatchRow[]>(
+      NARRATIVE_BATCH_SQL,
+      [today.start, yesterdayStart, today.end, scopeSppgId, this.demoMode],
+    );
+    const anomalyRows = await this.dataSource.query<NarrativeAnomalyRow[]>(
+      NARRATIVE_ANOMALY_SQL,
+      [scopeSppgId, this.demoMode],
+    );
+    const [ticketRow] = await this.dataSource.query<CountRow[]>(
+      NARRATIVE_TICKET_SQL,
+      [scopeSppgId, this.demoMode],
+    );
+    return Object.freeze({
+      tanggal: today.date,
+      cakupan: scopeSppgId === null ? 'semua' : 'sppg',
+      batch: Object.freeze({
+        total: toNumber(batchRow?.total),
+        totalKg: roundKg(toNumber(batchRow?.total_kg)),
+        gate: Object.freeze({
+          lolos: toNumber(batchRow?.gate_lolos),
+          perbaiki: toNumber(batchRow?.gate_perbaiki),
+          alihkan: toNumber(batchRow?.gate_alihkan),
+          tolak: toNumber(batchRow?.gate_tolak),
+        }),
+        menungguPutusan: toNumber(batchRow?.menunggu_putusan),
+      }),
+      sebelumnya: Object.freeze({
+        total: toNumber(batchRow?.prev_total),
+        totalKg: roundKg(toNumber(batchRow?.prev_kg)),
+      }),
+      anomaliTerbuka: Object.freeze(
+        anomalyRows.map((row) =>
+          Object.freeze({
+            jenis: row.jenis,
+            tingkat: row.tingkat,
+            jumlah: toNumber(row.jumlah),
+          }),
+        ),
+      ),
+      tiketBaru: toNumber(ticketRow?.total),
+      adaDataDemo: this.demoMode,
+    });
   }
 
   async summary(scopeSppgId: string | null): Promise<DashboardSummary> {

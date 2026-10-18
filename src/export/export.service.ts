@@ -14,6 +14,8 @@ import {
   exportRangeInvalidError,
   exportRateLimitedError,
 } from './export.errors.js';
+import { renderBatchesPdf } from './pdf/pdf-batches.renderer.js';
+import type { PdfBatchRow } from './pdf/pdf-batches.types.js';
 import type { ExportBatchesQueryDto } from './dto/export-batches-query.dto.js';
 
 const DEFAULT_RANGE_DAYS = 30;
@@ -81,6 +83,45 @@ export interface BatchesCsvResult {
   readonly quotaRemaining: number;
 }
 
+export interface BatchesPdfResult {
+  readonly bytes: Uint8Array;
+  readonly filename: string;
+  readonly rowCount: number;
+  readonly pageCount: number;
+  readonly truncated: boolean;
+  readonly quotaRemaining: number;
+}
+
+interface FetchedBatches {
+  readonly range: { readonly from: string; readonly to: string };
+  readonly rows: readonly BatchExportRow[];
+  readonly truncated: boolean;
+}
+
+interface QuotaClaim {
+  readonly range: { readonly from: string; readonly to: string };
+  readonly sppgId: string | undefined;
+  readonly format: 'csv' | 'pdf';
+  readonly rowCount: number;
+  readonly truncated: boolean;
+  readonly actor: AuthenticatedUser;
+  readonly requestId: string | null;
+}
+
+const toPdfRow = (row: BatchExportRow): PdfBatchRow =>
+  Object.freeze({
+    tanggalWib: row.tanggal_wib,
+    sppgNama: row.sppg_nama,
+    aliran: row.aliran,
+    beratKg: row.berat_kg,
+    gateStatus: row.gate_status,
+    tingkatPutusan: row.tingkat_putusan,
+    status: row.status,
+    fasilitasTujuan: row.fasilitas_tujuan,
+    jumlahEvent: row.jumlah_event,
+    anomaliTerbuka: row.anomali_terbuka,
+  });
+
 const shiftDate = (date: string, days: number): string =>
   new Date(Date.parse(`${date}T00:00:00.000Z`) + days * DAY_MS)
     .toISOString()
@@ -90,6 +131,7 @@ const shiftDate = (date: string, days: number): string =>
 export class ExportService {
   private readonly demoMode: boolean;
   private readonly exportPerDay: number;
+  private readonly pdfMaxRows: number;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -99,6 +141,7 @@ export class ExportService {
     const config = configService.getOrThrow<AppConfiguration>('app');
     this.demoMode = config.demoMode;
     this.exportPerDay = config.throttle.exportPerDay;
+    this.pdfMaxRows = config.export.pdfMaxRows;
   }
 
   private resolveRange(
@@ -125,26 +168,56 @@ export class ExportService {
     return { from: resolvedFrom, to: resolvedTo };
   }
 
+  private async fetchBatches(
+    query: ExportBatchesQueryDto,
+    maxRows: number,
+  ): Promise<FetchedBatches> {
+    const range = this.resolveRange(query.from, query.to);
+    const rows = await this.dataSource.query<BatchExportRow[]>(BATCHES_SQL, [
+      wibDayRangeUtc(range.from).start,
+      wibDayRangeUtc(range.to).end,
+      query.sppgId ?? null,
+      this.demoMode,
+      maxRows + 1,
+    ]);
+    const truncated = rows.length > maxRows;
+    return Object.freeze({
+      range,
+      rows: Object.freeze(truncated ? rows.slice(0, maxRows) : rows),
+      truncated,
+    });
+  }
+
+  private async claimQuota(claim: QuotaClaim): Promise<number> {
+    const quota = await this.auditService.consumeExportQuota({
+      aktor: claim.actor.id,
+      aktorPeran: claim.actor.role,
+      limitPerDay: this.exportPerDay,
+      detail: {
+        format: claim.format,
+        from: claim.range.from,
+        to: claim.range.to,
+        sppgId: claim.sppgId ?? null,
+        rowCount: claim.rowCount,
+        truncated: claim.truncated,
+      },
+      requestId: claim.requestId,
+    });
+    if (!quota.allowed) {
+      throw exportRateLimitedError(this.exportPerDay);
+    }
+    return Math.max(0, this.exportPerDay - quota.used - 1);
+  }
+
   async batchesCsv(
     query: ExportBatchesQueryDto,
     actor: AuthenticatedUser,
     requestId: string | null,
   ): Promise<BatchesCsvResult> {
-    const range = this.resolveRange(query.from, query.to);
-    const start = wibDayRangeUtc(range.from).start;
-    const end = wibDayRangeUtc(range.to).end;
-    const rows = await this.dataSource.query<BatchExportRow[]>(BATCHES_SQL, [
-      start,
-      end,
-      query.sppgId ?? null,
-      this.demoMode,
-      MAX_EXPORT_ROWS + 1,
-    ]);
-    const truncated = rows.length > MAX_EXPORT_ROWS;
-    const visible = truncated ? rows.slice(0, MAX_EXPORT_ROWS) : rows;
+    const fetched = await this.fetchBatches(query, MAX_EXPORT_ROWS);
     const csv = buildCsv(
       HEADER,
-      visible.map((row) => [
+      fetched.rows.map((row) => [
         row.batch_id,
         row.tanggal_wib,
         row.sppg_nama,
@@ -159,29 +232,53 @@ export class ExportService {
         row.is_demo,
       ]),
     );
-    const quota = await this.auditService.consumeExportQuota({
-      aktor: actor.id,
-      aktorPeran: actor.role,
-      limitPerDay: this.exportPerDay,
-      detail: {
-        format: 'csv',
-        from: range.from,
-        to: range.to,
-        sppgId: query.sppgId ?? null,
-        rowCount: visible.length,
-        truncated,
-      },
+    const quotaRemaining = await this.claimQuota({
+      range: fetched.range,
+      sppgId: query.sppgId,
+      format: 'csv',
+      rowCount: fetched.rows.length,
+      truncated: fetched.truncated,
+      actor,
       requestId,
     });
-    if (!quota.allowed) {
-      throw exportRateLimitedError(this.exportPerDay);
-    }
     return Object.freeze({
       csv,
-      filename: `argus-batches-${range.from}_${range.to}.csv`,
-      rowCount: visible.length,
-      truncated,
-      quotaRemaining: Math.max(0, this.exportPerDay - quota.used - 1),
+      filename: `argus-batches-${fetched.range.from}_${fetched.range.to}.csv`,
+      rowCount: fetched.rows.length,
+      truncated: fetched.truncated,
+      quotaRemaining,
+    });
+  }
+
+  async batchesPdf(
+    query: ExportBatchesQueryDto,
+    actor: AuthenticatedUser,
+    requestId: string | null,
+  ): Promise<BatchesPdfResult> {
+    const fetched = await this.fetchBatches(query, this.pdfMaxRows);
+    const document = await renderBatchesPdf({
+      rows: fetched.rows.map(toPdfRow),
+      range: fetched.range,
+      generatedAt: new Date(),
+      truncated: fetched.truncated,
+      demoIncluded: this.demoMode,
+    });
+    const quotaRemaining = await this.claimQuota({
+      range: fetched.range,
+      sppgId: query.sppgId,
+      format: 'pdf',
+      rowCount: document.rowCount,
+      truncated: fetched.truncated,
+      actor,
+      requestId,
+    });
+    return Object.freeze({
+      bytes: document.bytes,
+      filename: `argus-batches-${fetched.range.from}_${fetched.range.to}.pdf`,
+      rowCount: document.rowCount,
+      pageCount: document.pageCount,
+      truncated: fetched.truncated,
+      quotaRemaining,
     });
   }
 }

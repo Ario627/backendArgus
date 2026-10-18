@@ -5,7 +5,7 @@ import type {
 
 export interface AnomalyDto {
   readonly id: string;
-  readonly batchId: string;
+  readonly batchId: string | null;
   readonly sppgId: string;
   readonly sppgNama: string;
   readonly jenis: AnomalyKind;
@@ -20,7 +20,7 @@ export interface AnomalyDto {
 
 export interface AnomalyRow {
   readonly id: string;
-  readonly batch_id: string;
+  readonly batch_id: string | null;
   readonly sppg_id: string;
   readonly sppg_nama: string;
   readonly jenis: AnomalyKind;

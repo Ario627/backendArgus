@@ -8,6 +8,21 @@ import { ExportBatchesQueryDto } from './dto/export-batches-query.dto.js';
 import { ExportService } from './export.service.js';
 
 const CSV_CONTENT_TYPE = 'text/csv; charset=utf-8';
+const PDF_CONTENT_TYPE = 'application/pdf';
+
+const applyCommonHeaders = (
+  response: Response,
+  filename: string,
+  contentType: string,
+): void => {
+  response.setHeader('Content-Type', contentType);
+  response.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${filename}"`,
+  );
+  response.setHeader('Cache-Control', 'no-store');
+  response.setHeader('Pragma', 'no-cache');
+};
 
 @Controller('export')
 export class ExportController {
@@ -27,12 +42,7 @@ export class ExportController {
       actor,
       request.requestId ?? null,
     );
-    response.setHeader('Content-Type', CSV_CONTENT_TYPE);
-    response.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${result.filename}"`,
-    );
-    response.setHeader('Cache-Control', 'no-store');
+    applyCommonHeaders(response, result.filename, CSV_CONTENT_TYPE);
     response.setHeader('X-Export-Rows', String(result.rowCount));
     response.setHeader(
       'X-Export-Truncated',
@@ -43,5 +53,33 @@ export class ExportController {
       String(result.quotaRemaining),
     );
     return result.csv;
+  }
+
+  @Get('batches.pdf')
+  @Roles('admin', 'dlh_auditor')
+  @RawResponse()
+  async batchesPdf(
+    @Query() query: ExportBatchesQueryDto,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Req() request: Request,
+    @Res() response: Response,
+  ): Promise<void> {
+    const result = await this.exportService.batchesPdf(
+      query,
+      actor,
+      request.requestId ?? null,
+    );
+    applyCommonHeaders(response, result.filename, PDF_CONTENT_TYPE);
+    response.setHeader('X-Export-Rows', String(result.rowCount));
+    response.setHeader('X-Export-Pages', String(result.pageCount));
+    response.setHeader(
+      'X-Export-Truncated',
+      result.truncated ? 'true' : 'false',
+    );
+    response.setHeader(
+      'X-Export-Quota-Remaining',
+      String(result.quotaRemaining),
+    );
+    response.end(Buffer.from(result.bytes));
   }
 }

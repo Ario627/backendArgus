@@ -10,6 +10,10 @@ import { Repository } from 'typeorm';
 import type { FleetStatus } from '../common/constant/domain.constant.js';
 import type { AppConfiguration } from '../config/configuration.js';
 import { Fleet } from '../database/entities/fleet.entity.js';
+import {
+  OpsNotifierService,
+  type OpsAlert,
+} from '../ops/ops-notifier.service.js';
 
 const WATCHDOG_SQL = `
 WITH target AS (
@@ -41,6 +45,39 @@ interface TransitionRow {
   readonly sesudah: FleetStatus;
 }
 
+export const offlineAlert = (
+  row: TransitionRow,
+  offlineThisSweep: number,
+): OpsAlert | null => {
+  if (row.sesudah === 'OFFLINE') {
+    return {
+      type: 'fleet_offline',
+      severity: 'CRITICAL',
+      message: `armada ${row.kode} offline (${row.sebelum})`,
+      detail: {
+        kode: row.kode,
+        sebelum: row.sebelum,
+        sesudah: row.sesudah,
+        offlineThisSweep,
+      },
+    };
+  }
+  if (row.sesudah === 'STALE') {
+    return {
+      type: 'fleet_offline',
+      severity: 'WARNING',
+      message: `armada ${row.kode} berhenti mengirim data (${row.sebelum} -> STALE)`,
+      detail: {
+        kode: row.kode,
+        sebelum: row.sebelum,
+        sesudah: row.sesudah,
+        offlineThisSweep,
+      },
+    };
+  }
+  return null;
+};
+
 @Injectable()
 export class FleetWatchdogService
   implements OnApplicationBootstrap, OnApplicationShutdown
@@ -56,6 +93,7 @@ export class FleetWatchdogService
     configService: ConfigService,
     @InjectRepository(Fleet)
     private readonly fleetRepository: Repository<Fleet>,
+    private readonly opsNotifier: OpsNotifierService,
   ) {
     const config = configService.getOrThrow<AppConfiguration>('app');
     this.staleSeconds = config.liveness.staleThresholdSeconds;
@@ -83,10 +121,17 @@ export class FleetWatchdogService
         WATCHDOG_SQL,
         [this.staleSeconds, this.offlineSeconds],
       );
+      const offlineThisSweep = rows.filter(
+        (row) => row.sesudah === 'OFFLINE',
+      ).length;
       for (const row of rows) {
         this.logger.log(
           `liveness armada ${row.kode}: ${row.sebelum} -> ${row.sesudah}`,
         );
+        const alert = offlineAlert(row, offlineThisSweep);
+        if (alert !== null) {
+          void this.opsNotifier.notifyThrottled(`fleet:${row.kode}`, alert);
+        }
       }
     } catch (error) {
       this.logger.error(

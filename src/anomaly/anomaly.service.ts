@@ -17,7 +17,7 @@ import {
 const LIST_SQL = `
 SELECT a.id,
        a.batch_id,
-       b.sppg_id,
+       COALESCE(a.sppg_id, b.sppg_id) AS sppg_id,
        s.nama AS sppg_nama,
        a.jenis,
        a.tingkat,
@@ -27,12 +27,12 @@ SELECT a.id,
        a.ditutup_oleh,
        a.is_demo
   FROM anomali a
-  JOIN batch b ON b.id = a.batch_id
-  JOIN sppg s ON s.id = b.sppg_id
+  LEFT JOIN batch b ON b.id = a.batch_id
+  JOIN sppg s ON s.id = COALESCE(a.sppg_id, b.sppg_id)
  WHERE ($1::bool IS NULL OR (a.ditutup_at IS NULL) = $1)
    AND ($2::text IS NULL OR a.jenis = $2)
    AND ($3::text IS NULL OR a.tingkat = $3)
-   AND ($4::uuid IS NULL OR b.sppg_id = $4)
+   AND ($4::uuid IS NULL OR COALESCE(a.sppg_id, b.sppg_id) = $4)
    AND ($7::bool IS TRUE OR a.is_demo = FALSE)
  ORDER BY a.dibuka_at DESC, a.id ASC
  LIMIT $5 OFFSET $6`;
@@ -40,11 +40,11 @@ SELECT a.id,
 const COUNT_SQL = `
 SELECT count(*)::int AS total
   FROM anomali a
-  JOIN batch b ON b.id = a.batch_id
+  LEFT JOIN batch b ON b.id = a.batch_id
  WHERE ($1::bool IS NULL OR (a.ditutup_at IS NULL) = $1)
    AND ($2::text IS NULL OR a.jenis = $2)
    AND ($3::text IS NULL OR a.tingkat = $3)
-   AND ($4::uuid IS NULL OR b.sppg_id = $4)
+   AND ($4::uuid IS NULL OR COALESCE(a.sppg_id, b.sppg_id) = $4)
    AND ($5::bool IS TRUE OR a.is_demo = FALSE)`;
 
 const CLOSE_SQL = `
@@ -85,11 +85,15 @@ export class AnomalyService {
 
   private async loadRow(id: string): Promise<AnomalyRow | null> {
     const rows = await this.dataSource.query<AnomalyRow[]>(
-      `SELECT a.id, a.batch_id, b.sppg_id, s.nama AS sppg_nama, a.jenis, a.tingkat, a.detail,
+      `SELECT a.id,
+              a.batch_id,
+              COALESCE(a.sppg_id, b.sppg_id) AS sppg_id,
+              s.nama AS sppg_nama,
+              a.jenis, a.tingkat, a.detail,
               a.dibuka_at, a.ditutup_at, a.ditutup_oleh, a.is_demo
          FROM anomali a
-         JOIN batch b ON b.id = a.batch_id
-         JOIN sppg s ON s.id = b.sppg_id
+         LEFT JOIN batch b ON b.id = a.batch_id
+         JOIN sppg s ON s.id = COALESCE(a.sppg_id, b.sppg_id)
         WHERE a.id = $1`,
       [id],
     );

@@ -1,8 +1,13 @@
 import {
   OPTIMIZER_STATUSES,
+  OPTIMIZER_STRATEGIES,
+  OPTIMIZER_UNASSIGNED_REASONS,
   type OptimizerResponse,
   type OptimizerRoute,
   type OptimizerStatus,
+  type OptimizerStrategy,
+  type OptimizerUnassigned,
+  type OptimizerUnassignedReason,
 } from './optimizer.contract.js';
 
 const MAX_ROUTES = 64;
@@ -31,6 +36,29 @@ const isNonEmptyString = (value: unknown): value is string =>
 const isOptimizerStatus = (value: unknown): value is OptimizerStatus =>
   typeof value === 'string' &&
   (OPTIMIZER_STATUSES as readonly string[]).includes(value);
+
+const isUnassignedReason = (
+  value: unknown,
+): value is OptimizerUnassignedReason =>
+  typeof value === 'string' &&
+  (OPTIMIZER_UNASSIGNED_REASONS as readonly string[]).includes(value);
+
+const isOptimizerStrategy = (value: unknown): value is OptimizerStrategy =>
+  typeof value === 'string' &&
+  (OPTIMIZER_STRATEGIES as readonly string[]).includes(value);
+
+const parseUnassigned = (value: unknown): OptimizerUnassigned | null => {
+  if (isNonEmptyString(value)) {
+    return Object.freeze({ batchId: value, reason: 'OPTIMIZER' as const });
+  }
+  if (!isRecord(value)) return null;
+  const { batchId, reason } = value;
+  if (!isNonEmptyString(batchId)) return null;
+  return Object.freeze({
+    batchId,
+    reason: isUnassignedReason(reason) ? reason : 'TIDAK_TERJADWAL',
+  });
+};
 
 const parseRoute = (value: unknown): OptimizerRoute | null => {
   if (!isRecord(value)) return null;
@@ -79,13 +107,14 @@ export const parseOptimizerResponse = (
   ) {
     return null;
   }
-  const unassigned: string[] = [];
+  const unassigned: OptimizerUnassigned[] = [];
   for (const entry of value.unassigned) {
-    if (!isNonEmptyString(entry)) return null;
-    unassigned.push(entry);
+    const parsed = parseUnassigned(entry);
+    if (parsed === null) return null;
+    unassigned.push(parsed);
   }
   if (!isRecord(value.solverStats)) return null;
-  const { objective, timeSeconds } = value.solverStats;
+  const { objective, timeSeconds, strategy } = value.solverStats;
   if (typeof objective !== 'number' || !Number.isFinite(objective)) return null;
   if (!isFiniteWithin(timeSeconds, 0, MAX_SECONDS)) return null;
   const planId =
@@ -100,6 +129,10 @@ export const parseOptimizerResponse = (
     planId,
     routes: Object.freeze(routes),
     unassigned: Object.freeze(unassigned),
-    solverStats: Object.freeze({ objective, timeSeconds }),
+    solverStats: Object.freeze({
+      objective,
+      timeSeconds,
+      ...(isOptimizerStrategy(strategy) ? { strategy } : {}),
+    }),
   });
 };

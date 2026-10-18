@@ -47,7 +47,13 @@ const bootstrap = async (): Promise<void> => {
     origin: [config.frontendUrl],
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
-    exposedHeaders: ['X-Request-Id'],
+    exposedHeaders: [
+      'X-Request-Id',
+      'X-Export-Rows',
+      'X-Export-Pages',
+      'X-Export-Truncated',
+      'X-Export-Quota-Remaining',
+    ],
     credentials: false,
     maxAge: 600,
   });

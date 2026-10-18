@@ -37,9 +37,7 @@ export class RoutingController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<PlanRouteResult> {
     const result = await this.routingService.plan(dto, actor);
-    response.status(
-      result.degraded ? HttpStatus.ACCEPTED : HttpStatus.CREATED,
-    );
+    response.status(result.degraded ? HttpStatus.ACCEPTED : HttpStatus.CREATED);
     return result;
   }
 

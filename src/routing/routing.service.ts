@@ -16,10 +16,24 @@ import { Sppg } from '../database/entities/sppg.entity.js';
 import { sppgNotFoundError } from '../sppg/sppg.errors.js';
 import { MapsClientService } from '../maps/maps-client.service.js';
 import { ParameterService } from '../parameter/parameter.service.js';
-import type { OptimizerStop, OptimizerVehicle } from './optimizer.contract.js';
+import type {
+  OptimizerPreviousRoute,
+  OptimizerStop,
+  OptimizerVehicle,
+} from './optimizer.contract.js';
 import { OptimizerClient } from './optimizer.client.js';
 import { buildOptimizerRequest } from './optimizer-request.util.js';
-import { planGreedy, type GreedyOutcome } from './greedy.util.js';
+import {
+  groupPreviousRoutes,
+  type PreviousStopRow,
+} from './previous-routes.util.js';
+import { windowSeconds } from './route-window.util.js';
+import {
+  resolveCostModel,
+  type OptimizerCostModel,
+} from './optimizer-cost.util.js';
+import { countHonoredLocks, planGreedy } from './greedy.util.js';
+import { OpsNotifierService } from '../ops/ops-notifier.service.js';
 import {
   routeNoBatchesError,
   routePlanActiveError,
@@ -42,6 +56,7 @@ import type { PlanRouteDto } from './dto/plan-route.dto.js';
 import type { RouteListQueryDto } from './dto/route-list-query.dto.js';
 import type {
   RoutePlanSummary,
+  RouteSolverStats,
   RouteUnassignedEntry,
 } from './route-summary.types.js';
 
@@ -135,6 +150,14 @@ SELECT rp.id AS "planId"
  GROUP BY rp.id
  LIMIT 20`;
 
+const PREVIOUS_STOPS_SQL = `
+SELECT rs.fleet_id AS "fleetId",
+       rs.batch_id AS "batchId"
+  FROM route_stop rs
+ WHERE rs.plan_id = $1
+   AND rs.fleet_id IS NOT NULL
+ ORDER BY rs.fleet_id ASC, rs.urutan ASC`;
+
 interface EligibleBatchRow {
   readonly batchId: string;
   readonly beratKg: string;
@@ -171,6 +194,7 @@ interface BuildPlanInput {
   readonly actorId: string | null;
   readonly allowGreedy: boolean;
   readonly reason: string | null;
+  readonly previousPlanId: string | null;
 }
 
 export interface PlanRouteResult {
@@ -193,11 +217,9 @@ interface PersistOptions {
   readonly unassigned: readonly RouteUnassignedEntry[];
   readonly skippedVehicles: readonly string[];
   readonly vehicles: readonly OptimizerVehicle[];
-  readonly solverStats: {
-    readonly objective: number;
-    readonly timeSeconds: number;
-  } | null;
+  readonly solverStats: RouteSolverStats | null;
   readonly speedSource: string;
+  readonly costSource: string;
 }
 
 @Injectable()
@@ -205,6 +227,7 @@ export class RoutingService {
   private readonly logger = new Logger(RoutingService.name);
   private readonly windowStart: string;
   private readonly windowEnd: string;
+  private readonly maxRouteSeconds: number | null;
   private readonly timeLimitSeconds: number;
   private readonly fallbackSpeedKmh: number;
   private readonly recoveryTimeoutMs: number;
@@ -218,10 +241,15 @@ export class RoutingService {
     private readonly mapsClient: MapsClientService,
     private readonly optimizerClient: OptimizerClient,
     private readonly parameterService: ParameterService,
+    private readonly opsNotifier: OpsNotifierService,
   ) {
     const config = configService.getOrThrow<AppConfiguration>('app');
     this.windowStart = config.route.windowStart;
     this.windowEnd = config.route.windowEnd;
+    this.maxRouteSeconds = windowSeconds(
+      config.route.windowStart,
+      config.route.windowEnd,
+    );
     this.timeLimitSeconds = config.route.timeLimitSeconds;
     this.fallbackSpeedKmh = config.route.fallbackSpeedKmh;
     this.recoveryTimeoutMs = config.optimizer.recoveryTimeoutMs;
@@ -239,12 +267,27 @@ export class RoutingService {
     speedKmh: number;
     source: string;
   }> {
-    const reading =
-      await this.parameterService.getValue('kecepatan_kota_km_jam');
+    const reading = await this.parameterService.getValue(
+      'kecepatan_kota_km_jam',
+    );
     if (reading !== null && reading.nilai !== null && reading.nilai > 0) {
       return { speedKmh: reading.nilai, source: `parameter:${reading.sumber}` };
     }
     return { speedKmh: this.fallbackSpeedKmh, source: 'fallback_env' };
+  }
+
+  private async resolveCostModel(
+    speedKmh: number,
+  ): Promise<OptimizerCostModel> {
+    const readings = await this.parameterService.getMany([
+      'biaya_per_km',
+      'penalti_umur_per_jam',
+    ]);
+    return resolveCostModel(
+      readings.get('biaya_per_km') ?? null,
+      readings.get('penalti_umur_per_jam') ?? null,
+      speedKmh,
+    );
   }
 
   private stopIndexMapOf(
@@ -273,6 +316,16 @@ export class RoutingService {
       }
     }
     return Math.round(meters / 10) / 100;
+  }
+
+  private async loadPreviousRoutes(
+    manager: EntityManager,
+    planId: string,
+  ): Promise<readonly OptimizerPreviousRoute[]> {
+    const rows = await manager.query<PreviousStopRow[]>(PREVIOUS_STOPS_SQL, [
+      planId,
+    ]);
+    return groupPreviousRoutes(rows);
   }
 
   private async loadEligible(
@@ -367,6 +420,7 @@ export class RoutingService {
         end: this.windowEndIso(input.date),
       }),
       speedSource: options.speedSource,
+      costSource: options.costSource,
       unassigned: Object.freeze([...options.unassigned]),
       tanpaFasilitas: Object.freeze([...tanpaFasilitas]),
       skippedVehicles: Object.freeze([...options.skippedVehicles]),
@@ -458,6 +512,11 @@ export class RoutingService {
     const sppgPoint: GeoCoordinate = { lat: sppg.lat, lng: sppg.lng };
     const readyAtIso = this.windowStartIso(input.date);
     const { speedKmh, source: speedSource } = await this.resolveSpeed();
+    const cost = await this.resolveCostModel(speedKmh);
+    const previousRoutes =
+      input.previousPlanId === null
+        ? null
+        : await this.loadPreviousRoutes(manager, input.previousPlanId);
     const { vehicles, skipped } = this.buildVehicles(
       fleets,
       sppgPoint,
@@ -503,26 +562,34 @@ export class RoutingService {
         (sum, batch) => sum + Number(batch.beratKg),
         0,
       );
-      const plan = await this.persistPlan(
-        input,
-        tanpaFasilitas,
-        manual,
-        {
-          status: 'NEEDS_MANUAL_SCHEDULING',
-          source: 'manual',
-          matrixSource: matrix.source,
-          totalKg: Math.round(totalKg * 100) / 100,
-          totalKm: null,
-          unassigned,
-          skippedVehicles: skipped,
-          vehicles,
-          solverStats: null,
-          speedSource,
-        },
-      );
+      const plan = await this.persistPlan(input, tanpaFasilitas, manual, {
+        status: 'NEEDS_MANUAL_SCHEDULING',
+        source: 'manual',
+        matrixSource: matrix.source,
+        totalKg: Math.round(totalKg * 100) / 100,
+        totalKm: null,
+        unassigned,
+        skippedVehicles: skipped,
+        vehicles,
+        solverStats: null,
+        speedSource,
+        costSource: cost.source,
+      });
       this.logger.warn(
         `rencana manual ${plan.id} alasan=${reason} batch=${manual.length}`,
       );
+      void this.opsNotifier.notifyThrottled(`route:${input.sppgId}`, {
+        type: 'optimizer_degraded',
+        severity: reason === 'TANPA_ARMADA' ? 'WARNING' : 'CRITICAL',
+        message: `rute ${input.date} disusun manual (${reason}) untuk SPPG ${input.sppgId}`,
+        detail: {
+          sppgId: input.sppgId,
+          date: input.date,
+          reason,
+          planId: plan.id,
+          batchCount: manual.length,
+        },
+      });
       return { plan, degraded: true };
     };
 
@@ -544,6 +611,10 @@ export class RoutingService {
         depotId: input.sppgId,
         readyAtIso,
         timeLimitSeconds: this.timeLimitSeconds,
+        travelCostPerSecond: cost.travelCostPerSecond,
+        latePenaltyPerKgMinute: cost.latePenaltyPerKgMinute,
+        maxRouteSeconds: this.maxRouteSeconds,
+        previousRoutes,
         vehicles,
         stops,
         matrixSeconds: matrix.durationsSeconds,
@@ -583,10 +654,15 @@ export class RoutingService {
       }
 
       const unassigned: RouteUnassignedEntry[] = [...manualEntries];
-      for (const batchId of optimizerResponse.unassigned) {
-        if (batchIndex.has(batchId) && !assignedBatchIds.has(batchId)) {
-          assignedBatchIds.add(batchId);
-          unassigned.push(Object.freeze({ batchId, reason: 'OPTIMIZER' }));
+      for (const entry of optimizerResponse.unassigned) {
+        if (
+          batchIndex.has(entry.batchId) &&
+          !assignedBatchIds.has(entry.batchId)
+        ) {
+          assignedBatchIds.add(entry.batchId);
+          unassigned.push(
+            Object.freeze({ batchId: entry.batchId, reason: entry.reason }),
+          );
         }
       }
       for (const batch of batches) {
@@ -628,6 +704,7 @@ export class RoutingService {
           vehicles,
           solverStats: optimizerResponse.solverStats,
           speedSource,
+          costSource: cost.source,
         },
       );
       return { plan, degraded: false };
@@ -635,7 +712,9 @@ export class RoutingService {
 
     if (!input.allowGreedy) {
       return persistManual(
-        optimizerResponse === null ? 'OPTIMIZER_TIDAK_TERSEDIA' : 'TANPA_SOLUSI',
+        optimizerResponse === null
+          ? 'OPTIMIZER_TIDAK_TERSEDIA'
+          : 'TANPA_SOLUSI',
         [
           ...manualEntries,
           ...batches.map((batch) =>
@@ -651,12 +730,21 @@ export class RoutingService {
       );
     }
 
+    const locks =
+      previousRoutes?.map((route) =>
+        Object.freeze({
+          fleetId: route.fleetId,
+          sequence: route.sequence,
+        }),
+      ) ?? [];
+
     const greedy = planGreedy({
       stops: batches.map((batch, position) => {
         const stop = requestStopByBatch.get(batch.batchId);
         return {
           batchId: batch.batchId,
           kg: Number(batch.beratKg),
+          readyMs: stop === undefined ? null : Date.parse(stop.readyAt),
           deadlineMs:
             stop?.deadline === null || stop?.deadline === undefined
               ? null
@@ -671,6 +759,8 @@ export class RoutingService {
       durationsSeconds: matrix.durationsSeconds,
       serviceSecondsPerStop: SERVICE_SECONDS_PER_STOP,
       startEpochMs: Date.parse(readyAtIso),
+      maxSeconds: this.maxRouteSeconds,
+      locks,
     });
 
     const assignedGreedy = new Set<string>();
@@ -717,23 +807,37 @@ export class RoutingService {
       (sum, batch) => sum + Number(batch.beratKg),
       0,
     );
-    const plan = await this.persistPlan(
-      input,
-      tanpaFasilitas,
-      stopsToPersist,
-      {
-        status: 'AKTIF',
-        source: 'greedy',
-        matrixSource: matrix.source,
-        totalKg: Math.round(totalKg * 100) / 100,
-        totalKm: this.networkKm(sequences, batchIndex, matrix.distancesMeters),
-        unassigned,
-        skippedVehicles: skipped,
-        vehicles,
-        solverStats: null,
-        speedSource,
+    const plan = await this.persistPlan(input, tanpaFasilitas, stopsToPersist, {
+      status: 'AKTIF',
+      source: 'greedy',
+      matrixSource: matrix.source,
+      totalKg: Math.round(totalKg * 100) / 100,
+      totalKm: this.networkKm(sequences, batchIndex, matrix.distancesMeters),
+      unassigned,
+      skippedVehicles: skipped,
+      vehicles,
+      solverStats: null,
+      speedSource,
+      costSource: cost.source,
+    });
+    void this.opsNotifier.notifyThrottled(`route:${input.sppgId}`, {
+      type: 'optimizer_degraded',
+      severity: 'WARNING',
+      message: `rute ${input.date} memakai penyusun cadangan (greedy) untuk SPPG ${input.sppgId}`,
+      detail: {
+        sppgId: input.sppgId,
+        date: input.date,
+        reason: 'GREEDY_FALLBACK',
+        planId: plan.id,
+        batchCount: batches.length,
+        unassignedCount: unassigned.length,
+        lockRequested: locks.reduce(
+          (sum, lock) => sum + lock.sequence.length,
+          0,
+        ),
+        lockHonored: countHonoredLocks(locks, greedy.assignments),
       },
-    );
+    });
     return { plan, degraded: false };
   }
 
@@ -747,6 +851,7 @@ export class RoutingService {
       actorId: actor.id,
       allowGreedy: false,
       reason: null,
+      previousPlanId: null,
     });
   }
 
@@ -864,10 +969,7 @@ export class RoutingService {
     return toRouteStopDto(updated);
   }
 
-  async replan(
-    id: string,
-    actor: AuthenticatedUser,
-  ): Promise<PlanRouteResult> {
+  async replan(id: string, actor: AuthenticatedUser): Promise<PlanRouteResult> {
     const plan = await this.planRepository.findOne({ where: { id } });
     if (plan === null) throw routePlanNotFoundError();
     if (plan.sppgId === null) throw routePlanNotReplanableError();
@@ -885,13 +987,15 @@ export class RoutingService {
       actorId: actor.id,
       allowGreedy: true,
       reason: 'REPLAN',
+      previousPlanId: plan.id,
     });
   }
 
   async hasPlansWithBrokenFleet(): Promise<readonly string[]> {
-    const rows = await this.planRepository.manager.query<{ planId: string }[]>(
-      BROKEN_PLAN_SQL,
-    );
+    const rows =
+      await this.planRepository.manager.query<{ planId: string }[]>(
+        BROKEN_PLAN_SQL,
+      );
     return rows.map((row) => row.planId);
   }
 
@@ -912,6 +1016,7 @@ export class RoutingService {
         actorId: null,
         allowGreedy: true,
         reason: 'ARMADA_RUSAK',
+        previousPlanId: plan.id,
       });
     } catch (error) {
       this.logger.error(
