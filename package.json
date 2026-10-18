@@ -19,6 +19,7 @@
     "migration:run": "tsx --env-file-if-exists=.env src/database/migrate.ts run",
     "migration:status": "tsx --env-file-if-exists=.env src/database/migrate.ts status",
     "seed:demo": "tsx --env-file-if-exists=.env src/database/seed-demo.ts",
+    "seed:akun": "tsx --env-file-if-exists=.env src/database/seed-akun.ts",
     "broker:export": "tsx --env-file-if-exists=.env src/device/broker-export.ts",
     "verify:chains": "tsx src/database/verify-chains.ts",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
