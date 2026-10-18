@@ -20,6 +20,14 @@ export interface MenuServingDto {
   readonly duplicate: boolean;
 }
 
+export interface MenuServingListDto {
+  readonly id: string;
+  readonly tanggal: string;
+  readonly sppgId: string;
+  readonly menuItemId: string;
+  readonly titikId: string | null;
+}
+
 export interface ObservationDto {
   readonly id: string;
   readonly tanggal: string;
@@ -41,7 +49,10 @@ export const toMenuItemDto = (item: MenuItem): MenuItemDto => ({
   aktif: item.aktif,
 });
 
-export const toMenuServingDto = (serving: MenuServing, duplicate: boolean): MenuServingDto => ({
+export const toMenuServingDto = (
+  serving: MenuServing,
+  duplicate: boolean,
+): MenuServingDto => ({
   id: serving.id,
   tanggal: serving.tanggal,
   sppgId: serving.sppgId,
@@ -50,7 +61,19 @@ export const toMenuServingDto = (serving: MenuServing, duplicate: boolean): Menu
   duplicate,
 });
 
-export const toObservationDto = (observation: LeftoverObservation): ObservationDto => ({
+export const toMenuServingListDto = (
+  serving: MenuServing,
+): MenuServingListDto => ({
+  id: serving.id,
+  tanggal: serving.tanggal,
+  sppgId: serving.sppgId,
+  menuItemId: serving.menuItemId,
+  titikId: serving.titikId,
+});
+
+export const toObservationDto = (
+  observation: LeftoverObservation,
+): ObservationDto => ({
   id: observation.id,
   tanggal: observation.tanggal,
   sppgId: observation.sppgId,

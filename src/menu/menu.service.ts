@@ -20,6 +20,7 @@ import type { CreateObservationDto } from './dto/create-observation.dto.js';
 import type { CreateServingDto } from './dto/create-serving.dto.js';
 import type { MenuInsightQueryDto } from './dto/insight-query.dto.js';
 import type { MenuItemListQueryDto } from './dto/menu-list-query.dto.js';
+import type { ServingListQueryDto } from './dto/serving-list-query.dto.js';
 import {
   INSIGHT_METHOD_LINEAR,
   INSIGHT_SAMPLE_MIN,
@@ -38,9 +39,11 @@ import {
 import {
   toMenuItemDto,
   toMenuServingDto,
+  toMenuServingListDto,
   toObservationDto,
   type MenuItemDto,
   type MenuServingDto,
+  type MenuServingListDto,
   type ObservationDto,
 } from './menu.mapper.js';
 
@@ -126,6 +129,30 @@ export class MenuService {
       aktif: true,
     });
     return toMenuItemDto(await this.itemRepository.save(item));
+  }
+
+  async listServings(
+    query: ServingListQueryDto,
+    actor: AuthenticatedUser,
+  ): Promise<PaginatedItems<MenuServingListDto>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? DEFAULT_PAGE_SIZE;
+    const sppgId = this.resolveServingScope(query.sppgId, actor);
+    const [rows, total] = await this.servingRepository.findAndCount({
+      where: {
+        ...(query.tanggal === undefined ? {} : { tanggal: query.tanggal }),
+        ...(sppgId === undefined ? {} : { sppgId }),
+        ...(query.titikId === undefined ? {} : { titikId: query.titikId }),
+      },
+      order: { tanggal: 'DESC', id: 'DESC' },
+      take: limit,
+      skip: (page - 1) * limit,
+    });
+    return {
+      items: rows.map(toMenuServingListDto),
+      nextCursor: null,
+      total,
+    };
   }
 
   async createServing(
@@ -296,6 +323,19 @@ export class MenuService {
       return actor.sppgId;
     }
     return query.sppgId ?? null;
+  }
+
+  private resolveServingScope(
+    sppgId: string | undefined,
+    actor: AuthenticatedUser,
+  ): string | undefined {
+    if (actor.role === 'sppg_staff') {
+      if (actor.sppgId === null) throw forbiddenActionError();
+      if (sppgId !== undefined && sppgId !== actor.sppgId)
+        throw forbiddenActionError();
+      return actor.sppgId;
+    }
+    return sppgId;
   }
 
   private assertNotFuture(tanggal: string): void {

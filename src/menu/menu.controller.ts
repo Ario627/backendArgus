@@ -7,7 +7,12 @@ import { CreateObservationDto } from './dto/create-observation.dto.js';
 import { CreateServingDto } from './dto/create-serving.dto.js';
 import { MenuInsightQueryDto } from './dto/insight-query.dto.js';
 import { MenuItemListQueryDto } from './dto/menu-list-query.dto.js';
-import type { MenuItemDto, MenuServingDto } from './menu.mapper.js';
+import { ServingListQueryDto } from './dto/serving-list-query.dto.js';
+import type {
+  MenuItemDto,
+  MenuServingDto,
+  MenuServingListDto,
+} from './menu.mapper.js';
 import {
   MenuService,
   type MenuInsightReport,
@@ -23,6 +28,15 @@ export class MenuController {
     @Query() query: MenuItemListQueryDto,
   ): Promise<PaginatedItems<MenuItemDto>> {
     return this.menuService.listItems(query);
+  }
+
+  @Get('servings')
+  @Roles('admin', 'dlh_auditor', 'sppg_staff')
+  async listServings(
+    @Query() query: ServingListQueryDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ): Promise<PaginatedItems<MenuServingListDto>> {
+    return this.menuService.listServings(query, actor);
   }
 
   @Post('items')

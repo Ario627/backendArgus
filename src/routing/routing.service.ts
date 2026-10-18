@@ -877,6 +877,10 @@ export class RoutingService {
         'EXISTS (SELECT 1 FROM route_stop rs WHERE rs.plan_id = rp.id AND rs.fleet_id = :fleetId)',
         { fleetId: actor.fleetId ?? '00000000-0000-0000-0000-000000000000' },
       );
+    } else if (actor.role === 'sppg_staff') {
+      qb.andWhere('rp.sppgId = :scopeSppgId', {
+        scopeSppgId: actor.sppgId ?? '00000000-0000-0000-0000-000000000000',
+      });
     }
     const [rows, total] = await qb
       .orderBy('rp.created_at', 'DESC')
@@ -904,6 +908,9 @@ export class RoutingService {
     if (actor.role === 'driver') {
       const visible = stops.some((stop) => stop.fleetId === actor.fleetId);
       if (!visible) throw forbiddenActionError();
+    }
+    if (actor.role === 'sppg_staff' && plan.sppgId !== actor.sppgId) {
+      throw forbiddenActionError();
     }
     return { plan, stops };
   }

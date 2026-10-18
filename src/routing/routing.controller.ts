@@ -42,7 +42,7 @@ export class RoutingController {
   }
 
   @Get()
-  @Roles('admin', 'dlh_auditor', 'driver')
+  @Roles('admin', 'dlh_auditor', 'driver', 'sppg_staff')
   async list(
     @Query() query: RouteListQueryDto,
     @CurrentUser() actor: AuthenticatedUser,
@@ -51,7 +51,7 @@ export class RoutingController {
   }
 
   @Get(':id')
-  @Roles('admin', 'dlh_auditor', 'driver')
+  @Roles('admin', 'dlh_auditor', 'driver', 'sppg_staff')
   async detail(
     @Param('id', uuidParamPipe('id')) id: string,
     @CurrentUser() actor: AuthenticatedUser,
