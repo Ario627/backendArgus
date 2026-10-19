@@ -964,9 +964,8 @@ Bagian ini jujur menyebut apa yang belum sinkron antara kode, dokumentasi, dan b
 
 | Item | Masalah | Dampak |
 |---|---|---|
-| `docker-compose.yml` | Mengirim `DATABASE_URL` dan `MQTT_BROKER_URL` — aplikasi membaca `DB_HOST/DB_PORT/...` dan `MQTT_URL` | `docker compose up` akan gagal menyambung ke basis data |
+| `docker-compose.yml` | Mengirim `DATABASE_URL` dan `MQTT_BROKER_URL` — aplikasi membaca `DB_HOST/DB_PORT/...` dan `MQTT_URL` | `docker compose up` di folder ini akan gagal menyambung ke basis data; gunakan compose di repo root |
 | `docker-compose.yml` | Memasang `./config/mosquitto/passwd` yang tidak ada di repo | Mount gagal sebelum container start |
-| `Dockerfile` | Basis `node:22-alpine`, sedangkan `engines` menuntut Node 24.x | Build produksi memakai runtime yang tidak sesuai |
 | `docs/06` §6 | Menulis retensi telemetri "drop > 12 bulan"; kode memakai 90 hari (`TELEMETRY_DROP_AFTER_DAYS`) | Kebingungan kebijakan |
 | `docs/03` §2.11 | Menyebut `GET /parameters` dan `PUT /parameters/:kunci` — keduanya **sudah ada**; `seed:akun` belum terdokumentasi di `docs/06` §4 | Dokumentasi tertinggal dari kode |
 | `test/app.e2e-spec.ts` | Kerangka kosong; skenario K5 belum ditulis | Regresi alur utama hanya tertangkap uji manual |
