@@ -1,4 +1,8 @@
-import { NotFoundException, PayloadTooLargeException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  NotFoundException,
+  PayloadTooLargeException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 
 export const photoRequiredError = (): UnprocessableEntityException =>
   new UnprocessableEntityException({
@@ -18,14 +22,21 @@ export const photoHashMismatchError = (): UnprocessableEntityException =>
     message: 'Unggahan rusak, coba lagi',
   });
 
-export const photoFormatInvalidError = (detail: string): UnprocessableEntityException =>
+export const photoFormatInvalidError = (
+  detail: string,
+): UnprocessableEntityException =>
   new UnprocessableEntityException({
     code: 'PHOTO_FORMAT_INVALID',
     message: 'Format foto tidak didukung (hanya JPEG atau WebP)',
-    details: [{ code: 'PHOTO_FORMAT', field: 'file' }, { code: detail.slice(0, 64) }],
+    details: [
+      { code: 'PHOTO_FORMAT', field: 'file' },
+      { code: detail.slice(0, 64) },
+    ],
   });
 
-export const photoDimensionsInvalidError = (detail: string): UnprocessableEntityException =>
+export const photoDimensionsInvalidError = (
+  detail: string,
+): UnprocessableEntityException =>
   new UnprocessableEntityException({
     code: 'PHOTO_DIMENSIONS_INVALID',
     message: 'Dimensi foto tidak wajar',
@@ -33,4 +44,7 @@ export const photoDimensionsInvalidError = (detail: string): UnprocessableEntity
   });
 
 export const photoNotFoundError = (): NotFoundException =>
-  new NotFoundException({ code: 'PHOTO_NOT_FOUND', message: 'Foto tidak ditemukan' });
+  new NotFoundException({
+    code: 'PHOTO_NOT_FOUND',
+    message: 'Foto tidak ditemukan',
+  });

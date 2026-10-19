@@ -26,12 +26,30 @@ export interface DatabaseConfig {
   readonly migrationsRun: boolean;
 }
 
+export type StorageDriver = 'filesystem' | 's3' | 'cloudinary';
+
+export const STORAGE_DRIVERS = Object.freeze([
+  'filesystem',
+  's3',
+  'cloudinary',
+] as const);
+
 export interface StorageConfig {
+  readonly driver: StorageDriver;
+  readonly dir: string;
+  readonly publicApiUrl: string;
+  readonly urlSecret: string;
   readonly endpoint: string;
   readonly bucket: string;
   readonly accessKey: string;
   readonly secretKey: string;
   readonly region: string;
+  readonly cloudinary: {
+    readonly cloudName: string | null;
+    readonly apiKey: string | null;
+    readonly apiSecret: string | null;
+    readonly folder: string;
+  };
   readonly signedUrlTtlSeconds: number;
   readonly photoMaxBytes: number;
 }
@@ -167,6 +185,19 @@ export interface ThrottleConfig {
   readonly exportPerDay: number;
 }
 
+export interface RoutingConfig {
+  readonly googleKey: string | null;
+  readonly osrmBaseUrl: string;
+  readonly trafficEnabled: boolean;
+  readonly alternatives: number;
+  readonly timeoutMs: number;
+}
+
+export interface DispatchConfig {
+  readonly autoOnCreate: boolean;
+  readonly maxPerRun: number;
+}
+
 export interface AppConfiguration {
   readonly nodeEnv: NodeEnvironment;
   readonly isProduction: boolean;
@@ -183,6 +214,8 @@ export interface AppConfiguration {
   readonly auth: AuthConfig;
   readonly mqtt: MqttConfig;
   readonly mapbox: MapboxConfig;
+  readonly routing: RoutingConfig;
+  readonly dispatch: DispatchConfig;
   readonly optimizer: OptimizerConfig;
   readonly analytics: AnalyticsConfig;
   readonly llm: LlmConfig;
@@ -384,18 +417,35 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
       migrationsRun: reader.boolean('MIGRATIONS_RUN', false),
     }),
     storage: Object.freeze({
+      driver: reader.enumeration('STORAGE_DRIVER', STORAGE_DRIVERS, 'filesystem'),
+      dir: reader.text('STORAGE_DIR', './var/photos'),
+      publicApiUrl: reader.url(
+        'PUBLIC_API_URL',
+        `http://localhost:${reader.integer('PORT', 3000, 1, 65535)}/api/v1`,
+      ),
+      urlSecret: reader.secret(
+        'PHOTO_URL_SECRET',
+        32,
+        'dev-only-photo-url-secret-0123456789abcdef',
+      ),
       endpoint: reader.url('S3_ENDPOINT', 'http://localhost:9000'),
       bucket: reader.text('S3_BUCKET', 'argus-photos'),
       accessKey: reader.secret('S3_ACCESS_KEY', 8, 'argus-minio-access'),
       secretKey: reader.secret('S3_SECRET_KEY', 8, 'argus-minio-secret'),
       region: reader.text('S3_REGION', 'us-east-1'),
+      cloudinary: Object.freeze({
+        cloudName: reader.optionalText('CLOUDINARY_CLOUD_NAME'),
+        apiKey: reader.optionalText('CLOUDINARY_API_KEY'),
+        apiSecret: reader.optionalText('CLOUDINARY_API_SECRET'),
+        folder: reader.text('CLOUDINARY_FOLDER', 'argus/photos'),
+      }),
       signedUrlTtlSeconds: reader.integer(
         'PHOTO_SIGNED_URL_TTL_SECONDS',
         900,
         60,
         3600,
       ),
-      photoMaxBytes: reader.integer('PHOTO_MAX_BYTES', 1048576, 1024, 10485760),
+      photoMaxBytes: reader.integer('PHOTO_MAX_BYTES', 2097152, 1024, 10485760),
     }),
     auth: Object.freeze({
       jwtSecret: reader.secret(
@@ -445,6 +495,17 @@ export const buildConfiguration = (env: RawEnv): AppConfiguration => {
     mapbox: Object.freeze({
       token: reader.optionalText('MAPBOX_TOKEN'),
       timeoutMs: reader.integer('MAPBOX_TIMEOUT_MS', 8000, 1000, 60000),
+    }),
+    routing: Object.freeze({
+      googleKey: reader.optionalText('GOOGLE_MAPS_API_KEY'),
+      osrmBaseUrl: reader.url('OSRM_BASE_URL', 'https://router.project-osrm.org'),
+      trafficEnabled: reader.boolean('ROUTING_TRAFFIC', true),
+      alternatives: reader.integer('ROUTING_ALTERNATIVES', 3, 1, 5),
+      timeoutMs: reader.integer('ROUTING_TIMEOUT_MS', 8000, 1000, 60000),
+    }),
+    dispatch: Object.freeze({
+      autoOnCreate: reader.boolean('DISPATCH_AUTO_ON_CREATE', true),
+      maxPerRun: reader.integer('DISPATCH_MAX_PER_RUN', 8, 1, 50),
     }),
     optimizer: Object.freeze({
       url: reader.url('OPTIMIZER_URL', 'http://localhost:8100'),

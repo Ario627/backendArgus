@@ -1,15 +1,27 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
-import { FRACTION_CODES, type FractionCode, type GateStatus } from '../common/constant/domain.constant.js';
-import { assertTransition, BATCH_STATUS_TRANSITIONS } from '../common/constant/transitions.constant.js';
-import type { AuthenticatedUser, ApiErrorDetail, PaginatedItems } from '../common/types.js';
+import {
+  FRACTION_CODES,
+  type FractionCode,
+  type GateStatus,
+} from '../common/constant/domain.constant.js';
+import {
+  assertTransition,
+  BATCH_STATUS_TRANSITIONS,
+} from '../common/constant/transitions.constant.js';
+import type {
+  AuthenticatedUser,
+  ApiErrorDetail,
+  PaginatedItems,
+} from '../common/types.js';
 import { forbiddenActionError } from '../common/errors/http.errors.js';
 import { generateId } from '../common/utils/id.util.js';
 import { canReadBatch } from './batch-access.util.js';
 import { BatchFraction } from '../database/entities/batch-fraction.entity.js';
 import { Batch } from '../database/entities/batch.entity.js';
 import { Sppg } from '../database/entities/sppg.entity.js';
+import { DispatchService } from '../dispatch/dispatch.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { toLedgerEventDto } from '../ledger/ledger.mapper.js';
 import {
@@ -21,11 +33,22 @@ import {
   batchWeightRangeError,
   gateNotRetryableError,
 } from './batch.errors.js';
-import { toBatchDto, type BatchDetailDto, type BatchDto } from './batch.mapper.js';
+import {
+  toBatchDto,
+  type BatchDetailDto,
+  type BatchDto,
+} from './batch.mapper.js';
 import type { BatchListQueryDto } from './dto/batch-list-query.dto.js';
 import type { CreateBatchDto } from './dto/create-batch.dto.js';
-import { parseBatchFractions, type FractionViolation } from './fraction.util.js';
-import { DEFAULT_SAFE_PROFILE, evaluateGate, type GateResult } from './gate.service.js';
+import {
+  parseBatchFractions,
+  type FractionViolation,
+} from './fraction.util.js';
+import {
+  DEFAULT_SAFE_PROFILE,
+  evaluateGate,
+  type GateResult,
+} from './gate.service.js';
 
 const BATCH_WEIGHT_MIN_KG = 0.1;
 const BATCH_WEIGHT_MAX_KG = 500;
@@ -36,12 +59,13 @@ const DEFAULT_LIST_LIMIT = 20;
 
 type BatchStatusTarget = 'MENUNGGU_ANGKUT' | 'GAGAL_GATE' | 'TERSANGKUT';
 
-const BATCH_STATUS_BY_GATE: Readonly<Record<GateStatus, BatchStatusTarget>> = Object.freeze({
-  LOLOS: 'MENUNGGU_ANGKUT',
-  PERBAIKI: 'GAGAL_GATE',
-  ALIHKAN: 'MENUNGGU_ANGKUT',
-  TOLAK: 'TERSANGKUT',
-});
+const BATCH_STATUS_BY_GATE: Readonly<Record<GateStatus, BatchStatusTarget>> =
+  Object.freeze({
+    LOLOS: 'MENUNGGU_ANGKUT',
+    PERBAIKI: 'GAGAL_GATE',
+    ALIHKAN: 'MENUNGGU_ANGKUT',
+    TOLAK: 'TERSANGKUT',
+  });
 
 export interface CreateBatchResult {
   readonly batch: BatchDetailDto;
@@ -50,16 +74,24 @@ export interface CreateBatchResult {
 
 const roundHours = (hours: number): number => Math.round(hours * 10) / 10;
 
-const toFractionDetails = (violations: readonly FractionViolation[]): readonly ApiErrorDetail[] =>
-  violations.map((violation) => ({ code: violation.code, field: violation.field }));
+const toFractionDetails = (
+  violations: readonly FractionViolation[],
+): readonly ApiErrorDetail[] =>
+  violations.map((violation) => ({
+    code: violation.code,
+    field: violation.field,
+  }));
 
 const assertWeightRange = (aliran: string, weightKg: number): void => {
-  const withinGeneralRange = weightKg >= BATCH_WEIGHT_MIN_KG && weightKg <= BATCH_WEIGHT_MAX_KG;
+  const withinGeneralRange =
+    weightKg >= BATCH_WEIGHT_MIN_KG && weightKg <= BATCH_WEIGHT_MAX_KG;
   if (!withinGeneralRange) {
     throw batchWeightRangeError();
   }
   if (aliran === 'minyak' && weightKg > MINYAK_WEIGHT_MAX_KG) {
-    throw batchWeightRangeError([{ code: 'MINYAK_WEIGHT_RANGE', field: 'weightKg' }]);
+    throw batchWeightRangeError([
+      { code: 'MINYAK_WEIGHT_RANGE', field: 'weightKg' },
+    ]);
   }
 };
 
@@ -76,7 +108,11 @@ const assertOccurredAtWindow = (
   }
 };
 
-const composeGateDetail = (result: GateResult, ageHours: number, evaluatedAt: Date): Record<string, unknown> => ({
+const composeGateDetail = (
+  result: GateResult,
+  ageHours: number,
+  evaluatedAt: Date,
+): Record<string, unknown> => ({
   status: result.status,
   fixes: [...result.fixes],
   violations: result.violations.map((violation) => ({ ...violation })),
@@ -89,14 +125,22 @@ const composeGateDetail = (result: GateResult, ageHours: number, evaluatedAt: Da
 @Injectable()
 export class BatchService {
   constructor(
-    @InjectRepository(Batch) private readonly batchRepository: Repository<Batch>,
-    @InjectRepository(BatchFraction) private readonly fractionRepository: Repository<BatchFraction>,
+    @InjectRepository(Batch)
+    private readonly batchRepository: Repository<Batch>,
+    @InjectRepository(BatchFraction)
+    private readonly fractionRepository: Repository<BatchFraction>,
     @InjectRepository(Sppg) private readonly sppgRepository: Repository<Sppg>,
     private readonly ledgerService: LedgerService,
+    private readonly dispatchService: DispatchService,
   ) {}
 
-  async create(dto: CreateBatchDto, actor: AuthenticatedUser): Promise<CreateBatchResult> {
-    const sppg = await this.sppgRepository.findOne({ where: { id: dto.sppgId } });
+  async create(
+    dto: CreateBatchDto,
+    actor: AuthenticatedUser,
+  ): Promise<CreateBatchResult> {
+    const sppg = await this.sppgRepository.findOne({
+      where: { id: dto.sppgId },
+    });
     if (sppg === null) throw batchNotFoundError();
     if (actor.role === 'sppg_staff' && actor.sppgId !== sppg.id) {
       throw forbiddenActionError();
@@ -104,13 +148,17 @@ export class BatchService {
 
     assertWeightRange(dto.aliran, dto.weightKg);
     const fractions = parseBatchFractions(dto.aliran, dto.fractions ?? {});
-    if (!fractions.ok) throw batchFractionsInvalidError(toFractionDetails(fractions.violations));
+    if (!fractions.ok)
+      throw batchFractionsInvalidError(toFractionDetails(fractions.violations));
 
     const occurredAt = new Date(dto.occurredAt);
     const serverNow = new Date();
     assertOccurredAtWindow(occurredAt, serverNow, actor.role === 'admin');
 
-    const ageHours = Math.max(0, (serverNow.getTime() - occurredAt.getTime()) / 3600000);
+    const ageHours = Math.max(
+      0,
+      (serverNow.getTime() - occurredAt.getTime()) / 3600000,
+    );
     const gate = evaluateGate({
       aliran: dto.aliran,
       weightKg: dto.weightKg,
@@ -129,69 +177,102 @@ export class BatchService {
     });
 
     const batchId = dto.id ?? generateId();
-    return this.batchRepository.manager.transaction(async (manager) => {
-      const insertedId = await this.insertBatchRow(manager, {
-        batchId,
-        dto,
-        sppgId: sppg.id,
-        isDemo: sppg.isDemo,
-        occurredAt,
-        serverNow,
-      });
-      if (insertedId === null) {
-        const existing = await manager.findOne(Batch, { where: { clientEventId: dto.clientEventId } });
-        if (existing === null) throw batchIdConflictError();
-        return { batch: await this.composeDetail(manager, existing.id), duplicate: true };
-      }
+    const result = await this.batchRepository.manager.transaction(
+      async (manager) => {
+        const insertedId = await this.insertBatchRow(manager, {
+          batchId,
+          dto,
+          sppgId: sppg.id,
+          isDemo: sppg.isDemo,
+          occurredAt,
+          serverNow,
+        });
+        if (insertedId === null) {
+          const existing = await manager.findOne(Batch, {
+            where: { clientEventId: dto.clientEventId },
+          });
+          if (existing === null) throw batchIdConflictError();
+          return {
+            batch: await this.composeDetail(manager, existing.id),
+            duplicate: true,
+          };
+        }
 
-      await this.insertFractions(manager, batchId, fractions.fractions);
-      await this.ledgerService.appendWithinTransaction(manager, {
-        batchId,
-        tipe: 'DIKELUARKAN',
-        actorId: actor.id,
-        weightKg: dto.weightKg,
-        photoHash: dto.photoHash ?? null,
-        occurredAt,
-      });
-      await this.ledgerService.appendWithinTransaction(manager, {
-        batchId,
-        tipe: 'DITIMBANG',
-        actorId: actor.id,
-        weightKg: dto.weightKg,
-        occurredAt,
-      });
-      await manager.query(
-        `UPDATE batch SET status = $2, gate_status = $3, gate_detail = $4::jsonb WHERE id = $1`,
-        [batchId, targetStatus, gate.status, JSON.stringify(composeGateDetail(gate, ageHours, serverNow))],
-      );
+        await this.insertFractions(manager, batchId, fractions.fractions);
+        await this.ledgerService.appendWithinTransaction(manager, {
+          batchId,
+          tipe: 'DIKELUARKAN',
+          actorId: actor.id,
+          weightKg: dto.weightKg,
+          photoHash: dto.photoHash ?? null,
+          occurredAt,
+        });
+        await this.ledgerService.appendWithinTransaction(manager, {
+          batchId,
+          tipe: 'DITIMBANG',
+          actorId: actor.id,
+          weightKg: dto.weightKg,
+          occurredAt,
+        });
+        await manager.query(
+          `UPDATE batch SET status = $2, gate_status = $3, gate_detail = $4::jsonb WHERE id = $1`,
+          [
+            batchId,
+            targetStatus,
+            gate.status,
+            JSON.stringify(composeGateDetail(gate, ageHours, serverNow)),
+          ],
+        );
 
-      return { batch: await this.composeDetail(manager, batchId), duplicate: false };
-    });
+        return {
+          batch: await this.composeDetail(manager, batchId),
+          duplicate: false,
+        };
+      },
+    );
+
+    void this.dispatchService.autoAssignOnCreate(actor, sppg.id);
+    return result;
   }
 
-  async list(query: BatchListQueryDto, actor: AuthenticatedUser): Promise<PaginatedItems<BatchDto>> {
+  async list(
+    query: BatchListQueryDto,
+    actor: AuthenticatedUser,
+  ): Promise<PaginatedItems<BatchDto>> {
     const scopeSppgId = this.resolveListScope(query, actor);
     const limit = query.limit ?? DEFAULT_LIST_LIMIT;
     const baseQuery = () =>
       this.batchRepository
         .createQueryBuilder('b')
         .where(
-          scopeSppgId === undefined ? 'b.sppgId IS NOT NULL' : 'b.sppgId = :scopeSppgId',
+          scopeSppgId === undefined
+            ? 'b.sppgId IS NOT NULL'
+            : 'b.sppgId = :scopeSppgId',
           scopeSppgId === undefined ? {} : { scopeSppgId },
         )
-        .andWhere(query.status === undefined ? '1=1' : 'b.status = :status', { status: query.status })
-        .andWhere(query.tier === undefined ? '1=1' : 'b.tingkatPutusan = :tier', { tier: query.tier })
-        .andWhere(query.aliran === undefined ? '1=1' : 'b.aliran = :aliran', { aliran: query.aliran });
+        .andWhere(query.status === undefined ? '1=1' : 'b.status = :status', {
+          status: query.status,
+        })
+        .andWhere(
+          query.tier === undefined ? '1=1' : 'b.tingkatPutusan = :tier',
+          { tier: query.tier },
+        )
+        .andWhere(query.aliran === undefined ? '1=1' : 'b.aliran = :aliran', {
+          aliran: query.aliran,
+        });
 
     const rows = await baseQuery()
-      .andWhere(query.cursor === undefined ? '1=1' : 'b.id < :cursor', { cursor: query.cursor })
+      .andWhere(query.cursor === undefined ? '1=1' : 'b.id < :cursor', {
+        cursor: query.cursor,
+      })
       .orderBy('b.id', 'DESC')
       .take(limit)
       .getMany();
     const total = await baseQuery().getCount();
 
     const fractions = await this.fractionsByBatchIds(rows.map((row) => row.id));
-    const nextCursor = rows.length === limit ? (rows[rows.length - 1]?.id ?? null) : null;
+    const nextCursor =
+      rows.length === limit ? (rows[rows.length - 1]?.id ?? null) : null;
     return {
       items: rows.map((row) => toBatchDto(row, fractions.get(row.id) ?? [])),
       nextCursor,
@@ -199,7 +280,10 @@ export class BatchService {
     };
   }
 
-  async getDetail(id: string, actor: AuthenticatedUser): Promise<BatchDetailDto> {
+  async getDetail(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<BatchDetailDto> {
     const batch = await this.batchRepository.findOne({ where: { id } });
     if (batch === null) throw batchNotFoundError();
     if (!canReadBatch(actor, batch)) {
@@ -208,7 +292,11 @@ export class BatchService {
     return this.composeDetail(this.batchRepository.manager, id);
   }
 
-  async reGate(id: string, dto: { moistureProxy?: string; visibleOil?: boolean }, actor: AuthenticatedUser): Promise<BatchDetailDto> {
+  async reGate(
+    id: string,
+    dto: { moistureProxy?: string; visibleOil?: boolean },
+    actor: AuthenticatedUser,
+  ): Promise<BatchDetailDto> {
     const batch = await this.batchRepository.findOne({ where: { id } });
     if (batch === null) throw batchNotFoundError();
     if (actor.role === 'sppg_staff' && actor.sppgId !== batch.sppgId) {
@@ -217,12 +305,20 @@ export class BatchService {
     if (batch.status !== 'GAGAL_GATE') throw gateNotRetryableError();
 
     const serverNow = new Date();
-    const moistureProxy = (dto.moistureProxy ?? batch.kadarAirProksi ?? null) as 'kering' | 'sedang' | 'basah' | null;
+    const moistureProxy = (dto.moistureProxy ??
+      batch.kadarAirProksi ??
+      null) as 'kering' | 'sedang' | 'basah' | null;
     const visibleOil = dto.visibleOil ?? batch.adaMinyakTerlihat;
-    const ageHours = Math.max(0, (serverNow.getTime() - batch.dikeluarkanAt.getTime()) / 3600000);
+    const ageHours = Math.max(
+      0,
+      (serverNow.getTime() - batch.dikeluarkanAt.getTime()) / 3600000,
+    );
 
-    const fractions = await this.fractionRepository.find({ where: { batchId: id } });
-    const composition: Partial<Record<'A' | 'B' | 'C' | 'D' | 'E', number>> = {};
+    const fractions = await this.fractionRepository.find({
+      where: { batchId: id },
+    });
+    const composition: Partial<Record<'A' | 'B' | 'C' | 'D' | 'E', number>> =
+      {};
     for (const fraction of fractions) {
       composition[fraction.kode] = fraction.persen;
     }
@@ -241,10 +337,15 @@ export class BatchService {
 
     const transitionTarget = BATCH_STATUS_BY_GATE[gate.status];
     if (transitionTarget !== 'GAGAL_GATE') {
-      assertTransition('GAGAL_GATE', transitionTarget, BATCH_STATUS_TRANSITIONS, {
-        code: 'BATCH_GATE_STATUS_INVALID',
-        message: 'Hasil gate tidak menghasilkan status batch yang sah',
-      });
+      assertTransition(
+        'GAGAL_GATE',
+        transitionTarget,
+        BATCH_STATUS_TRANSITIONS,
+        {
+          code: 'BATCH_GATE_STATUS_INVALID',
+          message: 'Hasil gate tidak menghasilkan status batch yang sah',
+        },
+      );
     }
 
     await this.batchRepository.manager.query(
@@ -268,7 +369,10 @@ export class BatchService {
     return this.composeDetail(this.batchRepository.manager, id);
   }
 
-  private resolveListScope(query: BatchListQueryDto, actor: AuthenticatedUser): string | undefined {
+  private resolveListScope(
+    query: BatchListQueryDto,
+    actor: AuthenticatedUser,
+  ): string | undefined {
     if (actor.role === 'admin' || actor.role === 'dlh_auditor') {
       return query.sppgId;
     }
@@ -311,8 +415,9 @@ export class BatchService {
       .orIgnore()
       .returning('id')
       .execute();
-    const insertedId: unknown = result.raw[0]?.id;
-    return insertedId === undefined || insertedId === null ? null : String(insertedId);
+    const rows = result.raw as readonly { id?: unknown }[];
+    const insertedId = rows[0]?.id;
+    return typeof insertedId === 'string' ? insertedId : null;
   }
 
   private async insertFractions(
@@ -350,10 +455,15 @@ export class BatchService {
     return grouped;
   }
 
-  private async composeDetail(manager: EntityManager, id: string): Promise<BatchDetailDto> {
+  private async composeDetail(
+    manager: EntityManager,
+    id: string,
+  ): Promise<BatchDetailDto> {
     const batch = await manager.findOne(Batch, { where: { id } });
     if (batch === null) throw batchNotFoundError();
-    const fractions = await manager.find(BatchFraction, { where: { batchId: id } });
+    const fractions = await manager.find(BatchFraction, {
+      where: { batchId: id },
+    });
     const events = await this.ledgerService.listByBatchWithin(manager, id);
     return {
       ...toBatchDto(batch, fractions),

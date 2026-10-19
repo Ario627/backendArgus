@@ -25,7 +25,8 @@ export const routeNoBatchesError = (): UnprocessableEntityException =>
 export const routePlanActiveError = (): ConflictException =>
   new ConflictException({
     code: 'ROUTE_PLAN_ACTIVE',
-    message: 'Sudah ada rencana aktif untuk SPPG dan tanggal ini',
+    message:
+      'Sudah ada rencana rute untuk SPPG dan tanggal ini; susun ulang dari rencana tersebut',
   });
 
 export const routePlanNotReplanableError = (): ConflictException =>

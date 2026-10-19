@@ -12,6 +12,7 @@ import {
 } from './dashboard.service.js';
 import { DashboardSummaryQueryDto } from './dto/dashboard-query.dto.js';
 import { NarrativeQueryDto } from './dto/narrative-query.dto.js';
+import type { DashboardImpactDto } from './impact.dto.js';
 
 const NARRATIVE_LIMIT = 20;
 const NARRATIVE_WINDOW_MS = 60000;
@@ -41,6 +42,15 @@ export class DashboardController {
     @Query() query: DashboardSummaryQueryDto,
   ): Promise<DashboardSummary> {
     return this.dashboardService.summary(resolveScope(user, query.sppgId));
+  }
+
+  @Get('impact')
+  @Roles('admin', 'dlh_auditor', 'sppg_staff')
+  async impact(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: DashboardSummaryQueryDto,
+  ): Promise<DashboardImpactDto> {
+    return this.dashboardService.impact(resolveScope(user, query.sppgId));
   }
 
   @Get('narrative')

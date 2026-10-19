@@ -120,7 +120,7 @@ SELECT id
   FROM route_plan
  WHERE sppg_id = $1
    AND tanggal = $2
-   AND status = 'AKTIF'
+   AND status IN ('AKTIF', 'NEEDS_MANUAL_SCHEDULING')
  LIMIT 1`;
 
 const CANCEL_PLAN_SQL = `
@@ -956,6 +956,15 @@ export class RoutingService {
     const updated = await this.stopRepository.findOneOrFail({
       where: { id: stop.id },
     });
+    if (stop.jenis === 'AMBIL' && dto.status === 'SELESAI') {
+      await this.planRepository.manager.query(
+        `UPDATE batch
+            SET status = 'DIANGKUT'
+          WHERE id = $1
+            AND status = 'MENUNGGU_ANGKUT'`,
+        [stop.batchId],
+      );
+    }
     const open = await this.stopRepository.manager.query<OpenStopsRow[]>(
       CLOSE_STOPS_SQL,
       [plan.id],

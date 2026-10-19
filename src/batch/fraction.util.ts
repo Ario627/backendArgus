@@ -1,4 +1,8 @@
-import { FRACTION_CODES, type FractionCode, type WasteFlow } from '../common/constant/domain.constant.js';
+import {
+  FRACTION_CODES,
+  type FractionCode,
+  type WasteFlow,
+} from '../common/constant/domain.constant.js';
 import { sumTo2 } from '../common/utils/decimal.util.js';
 
 export const FRACTION_TOTAL_MAX = 100;
@@ -9,15 +13,22 @@ export interface FractionViolation {
 }
 
 export type FractionParseResult =
-  | { readonly ok: true; readonly fractions: Readonly<Partial<Record<FractionCode, number>>> }
+  | {
+      readonly ok: true;
+      readonly fractions: Readonly<Partial<Record<FractionCode, number>>>;
+    }
   | { readonly ok: false; readonly violations: readonly FractionViolation[] };
 
 const FRACTION_CODE_SET: ReadonlySet<string> = new Set(FRACTION_CODES);
 
-const isFractionCode = (value: string): value is FractionCode => FRACTION_CODE_SET.has(value);
+const isFractionCode = (value: string): value is FractionCode =>
+  FRACTION_CODE_SET.has(value);
 
 const isFractionValue = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= FRACTION_TOTAL_MAX;
+  typeof value === 'number' &&
+  Number.isFinite(value) &&
+  value >= 0 &&
+  value <= FRACTION_TOTAL_MAX;
 
 const readEntries = (
   raw: Readonly<Record<string, unknown>>,
@@ -27,11 +38,17 @@ const readEntries = (
   for (const key of Object.keys(raw)) {
     const value = raw[key];
     if (!isFractionCode(key)) {
-      violations.push({ code: 'FRACTION_UNKNOWN_KEY', field: `fractions.${key}` });
+      violations.push({
+        code: 'FRACTION_UNKNOWN_KEY',
+        field: `fractions.${key}`,
+      });
       continue;
     }
     if (!isFractionValue(value)) {
-      violations.push({ code: 'FRACTION_VALUE_RANGE', field: `fractions.${key}` });
+      violations.push({
+        code: 'FRACTION_VALUE_RANGE',
+        field: `fractions.${key}`,
+      });
       continue;
     }
     if (value > 0) {
@@ -53,10 +70,16 @@ export const parseBatchFractions = (
     violations.push({ code: 'FRACTION_SUM_OVER', field: 'fractions' });
   }
   if (flow === 'organik' && entries.length === 0 && violations.length === 0) {
-    violations.push({ code: 'FRACTION_REQUIRED_FOR_ORGANIK', field: 'fractions' });
+    violations.push({
+      code: 'FRACTION_REQUIRED_FOR_ORGANIK',
+      field: 'fractions',
+    });
   }
   if (flow === 'minyak' && entries.length > 0) {
-    violations.push({ code: 'FRACTION_NOT_ALLOWED_FOR_MINYAK', field: 'fractions' });
+    violations.push({
+      code: 'FRACTION_NOT_ALLOWED_FOR_MINYAK',
+      field: 'fractions',
+    });
   }
 
   if (violations.length > 0) {

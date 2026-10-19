@@ -28,6 +28,7 @@ import { HealthModule } from './health/health.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
 import { MenuModule } from './menu/menu.module.js';
 import { DispositionModule } from './disposition/disposition.module.js';
+import { DispatchModule } from './dispatch/dispatch.module.js';
 import { OpsModule } from './ops/ops.module.js';
 import { PhotoModule } from './photo/photo.module.js';
 import { RetentionModule } from './retention/retention.module.js';
@@ -82,6 +83,7 @@ const THROTTLE_WINDOW_MS = 60000;
     ExportModule,
     SyncModule,
     DispositionModule,
+    DispatchModule,
     PhotoModule,
     DashboardModule,
     HealthModule,

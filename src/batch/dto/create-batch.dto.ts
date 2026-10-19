@@ -1,5 +1,24 @@
-import { IsBoolean, IsIn, IsInt, IsISO8601, IsNumber, IsObject, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
-import { MOISTURE_PROXIES, WASTE_FLOWS, type MoistureProxy, type WasteFlow } from '../../common/constant/domain.constant.js';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsISO8601,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
+import {
+  MOISTURE_PROXIES,
+  WASTE_FLOWS,
+  type MoistureProxy,
+  type WasteFlow,
+} from '../../common/constant/domain.constant.js';
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const MAX_CLOCK_SKEW_MS = 300000;

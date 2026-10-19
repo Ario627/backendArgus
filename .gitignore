@@ -7,5 +7,6 @@ ormconfig.json
 akun-pilot.json
 akun-*.json
 !akun-pilot.example.json
+var/
 
 docs/

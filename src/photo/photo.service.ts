@@ -102,7 +102,7 @@ export class PhotoService {
     return {
       ...toPhotoDto(row),
       receivedSha256: receivedHash,
-      url: await this.storageService.signedGetUrl(storedHash),
+      url: this.storageService.signedGetUrl(storedHash),
     };
   }
 
@@ -115,7 +115,18 @@ export class PhotoService {
     await this.assertViewable(photo, actor);
     return {
       ...toPhotoDto(photo),
-      url: await this.storageService.signedGetUrl(photo.sha256),
+      url: this.storageService.signedGetUrl(photo.sha256),
+    };
+  }
+
+  async readFile(
+    sha256: string,
+  ): Promise<{ body: Buffer; contentType: string }> {
+    const stored = await this.storageService.get(sha256);
+    if (stored === null) throw photoNotFoundError();
+    return {
+      body: stored.body,
+      contentType: stored.contentType ?? 'application/octet-stream',
     };
   }
 

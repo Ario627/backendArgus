@@ -1,10 +1,19 @@
-import { ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import type { ApiErrorDetail } from '../common/types.js';
 
 export const batchNotFoundError = (): NotFoundException =>
-  new NotFoundException({ code: 'BATCH_NOT_FOUND', message: 'Batch tidak ditemukan' });
+  new NotFoundException({
+    code: 'BATCH_NOT_FOUND',
+    message: 'Batch tidak ditemukan',
+  });
 
-export const batchWeightRangeError = (details?: readonly ApiErrorDetail[]): UnprocessableEntityException =>
+export const batchWeightRangeError = (
+  details?: readonly ApiErrorDetail[],
+): UnprocessableEntityException =>
   new UnprocessableEntityException({
     code: 'BATCH_WEIGHT_RANGE',
     message: 'Berat harus antara 0,1 dan 500 kg',

@@ -8,6 +8,14 @@ import {
 } from '../common/utils/daily-range.util.js';
 import type { AppConfiguration } from '../config/configuration.js';
 import type { NarrativeAnomalyFact, NarrativeFacts } from '../llm/llm.types.js';
+import { ParameterService } from '../parameter/parameter.service.js';
+import type { DashboardImpactDto } from './impact.dto.js';
+import {
+  compareImpact,
+  type ImpactBatchRow,
+  type ImpactCandidateRow,
+  type ImpactFacility,
+} from './impact.util.js';
 
 interface BatchAggregateRow {
   readonly total: string;
@@ -129,6 +137,7 @@ export class DashboardService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     configService: ConfigService,
+    private readonly parameterService: ParameterService,
   ) {
     const config = configService.getOrThrow<AppConfiguration>('app');
     this.demoMode = config.demoMode;
@@ -245,6 +254,98 @@ export class DashboardService {
         anomaliTerbuka: toNumber(anomaliRow?.total),
         tiketBaru: toNumber(tiketRow?.total),
       }),
+    });
+  }
+
+  async impact(scopeSppgId: string | null): Promise<DashboardImpactDto> {
+    const range = wibDayRangeUtc(jakartaDateOf(new Date()));
+
+    const rows = await this.dataSource.query<
+      {
+        readonly id: string;
+        readonly sppg_id: string;
+        readonly sppg_lat: number;
+        readonly sppg_lng: number;
+        readonly status: string;
+        readonly tingkat_putusan: string | null;
+        readonly alasan_putusan: Record<string, unknown> | null;
+      }[]
+    >(
+      `SELECT b.id,
+              b.sppg_id,
+              s.lat AS sppg_lat,
+              s.lng AS sppg_lng,
+              b.status,
+              b.tingkat_putusan,
+              b.alasan_putusan
+         FROM batch b
+         JOIN sppg s ON s.id = b.sppg_id
+        WHERE b.dikeluarkan_at >= $1 AND b.dikeluarkan_at < $2
+          AND ($3::uuid IS NULL OR b.sppg_id = $3)
+          AND ($4::bool IS TRUE OR b.is_demo = FALSE)`,
+      [range.start, range.end, scopeSppgId, this.demoMode],
+    );
+
+    const facilities = await this.dataSource.query<ImpactFacility[]>(
+      `SELECT id, nama, lat, lng FROM fasilitas WHERE aktif = TRUE`,
+    );
+
+    const readCandidates = (
+      alasan: Record<string, unknown> | null,
+    ): readonly ImpactCandidateRow[] => {
+      if (alasan === null) return [];
+      const raw = alasan['candidates'];
+      if (!Array.isArray(raw)) return [];
+      const parsed: ImpactCandidateRow[] = [];
+      for (const entry of raw) {
+        if (entry === null || typeof entry !== 'object') continue;
+        const record = entry as Record<string, unknown>;
+        const facilityId = record['facilityId'];
+        if (typeof facilityId !== 'string') continue;
+        parsed.push({ facilityId, eligible: record['eligible'] === true });
+      }
+      return parsed;
+    };
+
+    const batches: ImpactBatchRow[] = rows.map((row) => {
+      const alasan =
+        row.alasan_putusan !== null && typeof row.alasan_putusan === 'object'
+          ? row.alasan_putusan
+          : null;
+      const chosen =
+        alasan === null || typeof alasan['chosenFacilityId'] !== 'string'
+          ? null
+          : alasan['chosenFacilityId'];
+      return {
+        id: row.id,
+        sppgId: row.sppg_id,
+        sppgLat: row.sppg_lat,
+        sppgLng: row.sppg_lng,
+        status: row.status,
+        tier: row.tingkat_putusan,
+        chosenFacilityId: chosen,
+        candidates: readCandidates(alasan),
+      };
+    });
+
+    const biayaRow = await this.parameterService.getValue('biaya_per_km');
+    const biayaPerKm =
+      typeof biayaRow?.nilai === 'number' && biayaRow.nilai > 0
+        ? biayaRow.nilai
+        : null;
+
+    const comparison = compareImpact(batches, facilities, biayaPerKm);
+
+    return Object.freeze({
+      date: range.date,
+      scopeSppgId,
+      biayaPerKm,
+      batch: comparison.batch,
+      nearest: comparison.nearest,
+      argus: comparison.argus,
+      dibandingkan: comparison.dibandingkan,
+      catatan:
+        'Rute terdekat dihitung dari jarak lurus SPPG ke fasilitas terdekat tanpa memeriksa profil penerimaan; keputusan ARGUS memakai fasilitas yang lolos profil dan menahan yang bisa ditangani di sumber. Angka ini bahan pengujian, bukan klaim penghematan.',
     });
   }
 }

@@ -58,9 +58,7 @@ export class MapsClientService {
     return this.buildHaversineMatrix(points, fallbackSpeedKmh);
   }
 
-  private async fetchMapboxMatrix(
-    points: readonly GeoCoordinate[],
-  ): Promise<{
+  private async fetchMapboxMatrix(points: readonly GeoCoordinate[]): Promise<{
     durationsSeconds: readonly (readonly number[])[];
     distancesMeters: readonly (readonly number[])[];
   } | null> {
@@ -75,7 +73,9 @@ export class MapsClientService {
       });
       const parsed = parseMapboxMatrix(response.data, points.length);
       if (parsed === null) {
-        this.logger.warn('respons Mapbox matrix tidak valid, memakai haversine');
+        this.logger.warn(
+          'respons Mapbox matrix tidak valid, memakai haversine',
+        );
       }
       return parsed;
     } catch (error) {

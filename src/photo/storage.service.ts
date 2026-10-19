@@ -1,27 +1,15 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
-  DeleteObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  PutObjectCommand,
-  S3Client,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { AppConfiguration } from '../config/configuration.js';
-
-const PHOTO_CACHE_CONTROL = 'private, max-age=3600';
-
-const isNotFound = (error: unknown): boolean => {
-  if (error === null || typeof error !== 'object') return false;
-  const record = error as Record<string, unknown>;
-  if (record.name === 'NotFound' || record.name === 'NoSuchKey') return true;
-  const metadata = record.$metadata;
-  if (metadata !== null && typeof metadata === 'object') {
-    return (metadata as Record<string, unknown>).httpStatusCode === 404;
-  }
-  return false;
-};
+import { CloudinaryStorageProvider } from './storage-cloudinary.provider.js';
+import { FilesystemStorageProvider } from './storage-filesystem.provider.js';
+import { S3StorageProvider } from './storage-s3.provider.js';
+import type { StorageProvider, StoredObject } from './storage.types.js';
 
 const storageUnavailable = (): ServiceUnavailableException =>
   new ServiceUnavailableException({
@@ -29,64 +17,67 @@ const storageUnavailable = (): ServiceUnavailableException =>
     message: 'Penyimpanan foto sedang tidak tersedia',
   });
 
+const SIGNATURE_PATTERN = /^[0-9a-f]{32}$/;
+
 @Injectable()
 export class StorageService {
-  private readonly client: S3Client;
-  private readonly bucket: string;
+  private readonly logger = new Logger(StorageService.name);
+  private readonly provider: StorageProvider;
+  private readonly publicApiUrl: string;
+  private readonly urlSecret: string;
   private readonly signedUrlTtlSeconds: number;
 
   constructor(configService: ConfigService) {
     const config = configService.getOrThrow<AppConfiguration>('app');
-    this.bucket = config.storage.bucket;
-    this.signedUrlTtlSeconds = config.storage.signedUrlTtlSeconds;
-    this.client = new S3Client({
-      endpoint: config.storage.endpoint,
-      region: config.storage.region,
-      credentials: {
-        accessKeyId: config.storage.accessKey,
-        secretAccessKey: config.storage.secretKey,
-      },
-      forcePathStyle: true,
-      requestChecksumCalculation: 'WHEN_REQUIRED',
-      responseChecksumValidation: 'WHEN_REQUIRED',
-    });
+    const storage = config.storage;
+    this.publicApiUrl = storage.publicApiUrl.replace(/\/+$/, '');
+    this.urlSecret = storage.urlSecret;
+    this.signedUrlTtlSeconds = storage.signedUrlTtlSeconds;
+    this.provider = this.buildProvider(storage);
+    this.logger.log(`penyimpanan foto: ${this.provider.name}`);
+  }
+
+  private buildProvider(storage: AppConfiguration['storage']): StorageProvider {
+    if (storage.driver === 'cloudinary') {
+      try {
+        return new CloudinaryStorageProvider(storage);
+      } catch (error) {
+        this.logger.error(
+          `Cloudinary tidak siap (${error instanceof Error ? error.message : 'UNKNOWN'}), memakai filesystem`,
+        );
+        return new FilesystemStorageProvider(storage.dir);
+      }
+    }
+    if (storage.driver === 's3') return new S3StorageProvider(storage);
+    return new FilesystemStorageProvider(storage.dir);
+  }
+
+  get driverName(): string {
+    return this.provider.name;
   }
 
   async has(key: string): Promise<boolean> {
     try {
-      await this.client.send(
-        new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
-      );
-      return true;
-    } catch (error) {
-      if (isNotFound(error)) return false;
+      return await this.provider.has(key);
+    } catch {
       throw storageUnavailable();
     }
   }
 
   async put(key: string, body: Buffer, contentType: string): Promise<void> {
     try {
-      await this.client.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-          Body: body,
-          ContentType: contentType,
-          CacheControl: PHOTO_CACHE_CONTROL,
-        }),
+      await this.provider.put(key, body, contentType);
+    } catch (error) {
+      this.logger.error(
+        `gagal menyimpan foto (${error instanceof Error ? error.message : 'UNKNOWN'})`,
       );
-    } catch {
       throw storageUnavailable();
     }
   }
 
-  async signedGetUrl(key: string): Promise<string> {
+  async get(key: string): Promise<StoredObject | null> {
     try {
-      return await getSignedUrl(
-        this.client,
-        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-        { expiresIn: this.signedUrlTtlSeconds },
-      );
+      return await this.provider.get(key);
     } catch {
       throw storageUnavailable();
     }
@@ -94,11 +85,33 @@ export class StorageService {
 
   async delete(key: string): Promise<void> {
     try {
-      await this.client.send(
-        new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
-      );
+      await this.provider.delete(key);
     } catch {
       throw storageUnavailable();
     }
+  }
+
+  private signatureOf(key: string, expiresAt: number): string {
+    return createHmac('sha256', this.urlSecret)
+      .update(`${key}.${expiresAt}`)
+      .digest('hex')
+      .slice(0, 32);
+  }
+
+  verifySignature(key: string, expiresAt: number, signature: string): boolean {
+    if (!SIGNATURE_PATTERN.test(signature)) return false;
+    if (!Number.isFinite(expiresAt) || expiresAt * 1000 < Date.now())
+      return false;
+    const expected = Buffer.from(this.signatureOf(key, expiresAt), 'utf8');
+    const received = Buffer.from(signature, 'utf8');
+    return (
+      expected.length === received.length && timingSafeEqual(expected, received)
+    );
+  }
+
+  signedGetUrl(key: string): string {
+    const expiresAt = Math.floor(Date.now() / 1000) + this.signedUrlTtlSeconds;
+    const signature = this.signatureOf(key, expiresAt);
+    return `${this.publicApiUrl}/photos/file/${key}?exp=${expiresAt}&sig=${signature}`;
   }
 }

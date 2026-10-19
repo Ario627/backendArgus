@@ -1,4 +1,7 @@
-import type { PhotoMimeType, PhotoRefType } from '../common/constant/domain.constant.js';
+import type {
+  PhotoMimeType,
+  PhotoRefType,
+} from '../common/constant/domain.constant.js';
 import type { Photo } from '../database/entities/photo.entity.js';
 
 export interface PhotoDto {

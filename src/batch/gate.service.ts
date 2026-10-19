@@ -6,7 +6,10 @@ import type {
 } from '../common/constant/domain.constant.js';
 import { GATE_SEVERITY } from '../common/constant/domain.constant.js';
 import { sumTo2 } from '../common/utils/decimal.util.js';
-import type { MoistureRules, VisibleOilPolicy } from '../facility/acceptance-profile.types.js';
+import type {
+  MoistureRules,
+  VisibleOilPolicy,
+} from '../facility/acceptance-profile.types.js';
 
 export interface GateProfile {
   readonly acceptsFractions: readonly FractionCode[] | null;
@@ -67,7 +70,12 @@ interface GateFinding {
 
 export const DEFAULT_SAFE_PROFILE: GateProfile = Object.freeze({
   acceptsFractions: null,
-  moisture: Object.freeze({ passMin: 45, passMax: 75, fixAbove: 75, rejectAbove: 80 }),
+  moisture: Object.freeze({
+    passMin: 45,
+    passMax: 75,
+    fixAbove: 75,
+    rejectAbove: 80,
+  }),
   maxAgeHours: null,
   contaminant: Object.freeze({ plasticPercentMax: null, visibleOil: null }),
   capacityKgPerDay: null,
@@ -75,7 +83,8 @@ export const DEFAULT_SAFE_PROFILE: GateProfile = Object.freeze({
   pricePerKg: null,
 });
 
-const formatHours = (value: number): string => (Math.round(value * 10) / 10).toFixed(1);
+const formatHours = (value: number): string =>
+  (Math.round(value * 10) / 10).toFixed(1);
 
 const ageFindings = (input: GateInput): readonly GateFinding[] => {
   const maxAgeHours = input.profile.maxAgeHours;
@@ -105,7 +114,8 @@ const moistureFindings = (input: GateInput): readonly GateFinding[] => {
       {
         rule: 'MOISTURE_KERING',
         severity: 'INFO',
-        detail: 'proksi uji remas: kering; substrat kering memperlambat pengolahan',
+        detail:
+          'proksi uji remas: kering; substrat kering memperlambat pengolahan',
       },
     ];
   }
@@ -182,7 +192,12 @@ const capacityFindings = (input: GateInput): readonly GateFinding[] => {
 };
 
 const flowFindings = (input: GateInput): readonly GateFinding[] => {
-  if (input.aliran !== 'minyak' || input.target === null || input.target.acceptsMinyak) return [];
+  if (
+    input.aliran !== 'minyak' ||
+    input.target === null ||
+    input.target.acceptsMinyak
+  )
+    return [];
   return [
     {
       rule: 'ALIRAN_MINYAK_TIDAK_DIDUKUNG',
@@ -205,7 +220,8 @@ const collectFixes = (findings: readonly GateFinding[]): readonly string[] => {
 const hardestStatus = (findings: readonly GateFinding[]): GateStatus =>
   findings.reduce<GateStatus>(
     (acc, finding) =>
-      finding.severity === 'INFO' || GATE_SEVERITY[finding.severity] <= GATE_SEVERITY[acc]
+      finding.severity === 'INFO' ||
+      GATE_SEVERITY[finding.severity] <= GATE_SEVERITY[acc]
         ? acc
         : finding.severity,
     'LOLOS',

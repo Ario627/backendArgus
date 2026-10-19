@@ -1,5 +1,8 @@
 import { IsIn, IsOptional, IsUUID, Matches } from 'class-validator';
-import { PHOTO_REF_TYPES, type PhotoRefType } from '../../common/constant/domain.constant.js';
+import {
+  PHOTO_REF_TYPES,
+  type PhotoRefType,
+} from '../../common/constant/domain.constant.js';
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 

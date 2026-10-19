@@ -3,7 +3,7 @@ import { Transform } from 'class-transformer';
 import {
   ROUTE_STATUSES,
   type RouteStatus,
-} from  '../../common/constant/domain.constant.js';
+} from '../../common/constant/domain.constant.js';
 import { ListQueryDto } from '../../common/dto/list-query.dto.js';
 import { trim } from '../../common/dto/transforms.js';
 

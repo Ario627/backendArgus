@@ -89,15 +89,13 @@ export const parseMapboxDirections = (
   if (payload === null || typeof payload !== 'object') return null;
   const routes = (payload as { routes?: unknown }).routes;
   if (!Array.isArray(routes) || routes.length === 0) return null;
-  const candidate = routes[0];
+  const candidate: unknown = routes[0];
   if (candidate === null || typeof candidate !== 'object') return null;
   const route = candidate as MapboxRoutePayload;
   const distanceMeters = finiteNumber(route.distance);
   const durationSeconds = finiteNumber(route.duration);
   if (distanceMeters === null || durationSeconds === null) return null;
-  const legs: readonly unknown[] = Array.isArray(route.legs)
-    ? route.legs
-    : [];
+  const legs: readonly unknown[] = Array.isArray(route.legs) ? route.legs : [];
   const firstLeg = legs[0];
   const rawSteps =
     firstLeg !== null && typeof firstLeg === 'object'
@@ -108,7 +106,7 @@ export const parseMapboxDirections = (
   const rawStepsList: readonly unknown[] = rawSteps;
   for (const raw of rawStepsList) {
     if (raw === null || typeof raw !== 'object') continue;
-    const parsed = stepOf(raw as MapboxStepPayload);
+    const parsed = stepOf(raw);
     if (parsed !== null) steps.push(parsed);
   }
   if (steps.length === 0) return null;

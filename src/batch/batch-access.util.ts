@@ -1,5 +1,5 @@
-import type { AuthenticatedUser } from "../common/types.js";
-import type { Batch } from "../database/entities/batch.entity.js";
+import type { AuthenticatedUser } from '../common/types.js';
+import type { Batch } from '../database/entities/batch.entity.js';
 
 export interface BatchAccessView {
   readonly sppgId: string;

@@ -57,7 +57,7 @@ Prinsip yang mengikat seluruh kode:
 
 | Metrik | Nilai |
 |---|---|
-| Endpoint HTTP | **76** |
+| Endpoint HTTP | **84** |
 | Direktori modul | **31** (27 domain + `common`, `config`, `database`, `analytics`) |
 | Migrasi SQL | **10** |
 | Unit test | **316 lulus** di **48 suite** |
@@ -91,8 +91,8 @@ Yang belum dikerjakan: `test/app.e2e-spec.ts` otomatis (K5) — verifikasi e2e s
 | `@nestjs/throttler` | Rate limit global dan per-endpoint |
 | `@nestjs/schedule` | Cron verifikasi rantai dan retensi |
 | `@nestjs/microservices` + `mqtt` | Ingest telemetri armada dan timbangan |
-| `@aws-sdk/client-s3` + `s3-request-presigner` | Penyimpanan foto (S3/MinIO) dengan signed URL |
-| `sharp` | Strip metadata EXIF + verifikasi dimensi foto |
+| `@aws-sdk/client-s3` + `s3-request-presigner` | Salah satu penyedia penyimpanan foto (S3/MinIO); dua lainnya memakai API HTTPS langsung |
+| `sharp` | Strip metadata EXIF, verifikasi dimensi, dan kompresi ulang foto |
 | `bcrypt` | Hash kata sandi (cost 12) |
 | `class-validator` + `class-transformer` | Validasi DTO |
 | `pdf-lib` | Ekspor laporan audit PDF |
@@ -287,7 +287,8 @@ flowchart TD
     B -->|PERBAIKI| D[GAGAL_GATE - staf perbaiki lalu gate ulang]
     B -->|ALIHKAN| C
     B -->|TOLAK| E[TERSANGKUT - tindakan manual]
-    C --> F[Kompas Disposisi: skor T0-T4]
+    C --> P[Antrean penugasan: skor prioritas]
+    P --> F[Kompas Disposisi: skor T0-T4]
     F --> G[Rute limpahan]
     G --> H[Serah terima saksi ganda]
     H --> I[Fasilitas konfirmasi DITERIMA]
@@ -311,13 +312,15 @@ flowchart TD
 | `menu` | Item menu, penyajian, observasi sisa, insights |
 | `tickets` | Lapor warga: endpoint publik + moderasi internal |
 | `struk` | Tautan struk publik bertanda tangan (HMAC) |
-| `routing` | Rencana rute, optimizer client, fallback greedy, replan |
+| `routing` | Rencana rute, optimizer client, fallback greedy, replan, penutupan stop |
+| `dispatch` | Antrean penugasan batch ke armada: skor prioritas, pemilihan kendaraan, penugasan otomatis |
+| `maps` | Rute berlapis lalu lintas: Google Routes, Mapbox, OSRM, fallback garis lurus |
 | `fleet` | Master armada, liveness, posisi |
 | `device` | Kredensial perangkat (tracker + timbangan), revokasi, rotasi secret |
 | `telemetry` | Ingest telemetri, watchdog liveness, ingest timbangan HMAC, antrean pending |
 | `sync` | Sinkronisasi batch dari antrean offline klien |
-| `photo` | Unggah foto, sanitasi gambar, signed URL |
-| `dashboard` | Ringkasan per peran + narasi opsional |
+| `photo` | Unggah foto, sanitasi gambar, penyedia penyimpanan, URL bertanda tangan |
+| `dashboard` | Ringkasan per peran, narasi opsional, perbandingan keputusan |
 | `anomaly` | Antrean anomali DLH, penutupan dengan catatan |
 | `analytics` | Bridge layanan analitik + pemindaian digit tidak wajar |
 | `export` | Ekspor CSV dan PDF laporan audit + kuota harian |
@@ -327,11 +330,80 @@ flowchart TD
 | `retention` | Retensi telemetri dan foto |
 | `llm` | Narasi dashboard (opsional, mati bila tanpa API key) |
 | `ops` | Notifikasi operasional via webhook |
-| `maps` | Klien matriks jarak Mapbox dengan fallback haversine |
 | `mqtt` | Koneksi broker, langganan topik |
 | `health` | Probe status untuk reverse proxy |
 
-### 6.3 Pola implementasi wajib
+### 6.3 Penyimpanan foto
+
+Penyimpanan dipilih lewat `STORAGE_DRIVER`; antarmuka `StorageProvider` (`has`, `put`, `get`, `delete`) membuat modul `photo` tidak tahu penyedia mana yang aktif.
+
+| Driver | Syarat | Perilaku |
+|---|---|---|
+| `filesystem` (default) | `STORAGE_DIR` | Tulis atomik (berkas sementara lalu `rename`), shard 2 karakter dari hash, mode `600` |
+| `s3` | `S3_ENDPOINT`, `S3_BUCKET`, kredensial | Signed URL S3/MinIO |
+| `cloudinary` | `CLOUDINARY_*` | Unggah `type=authenticated`, URL pengiriman bertanda tangan `s--sig--`, hapus lewat Admin API |
+
+Terlepas dari driver, klien **tidak pernah** menerima URL storage mentah. Foto disajikan backend:
+
+```
+GET /api/v1/photos/file/:sha256?exp=<unix>&sig=<hmac>
+```
+
+Tanda tangan HMAC-SHA256 (32 hex) dari `sha256|exp` dengan `PHOTO_URL_SECRET`, berlaku `PHOTO_SIGNED_URL_TTL_SECONDS` (default 900). Tanda tangan salah atau kedaluwarsa → 403, bukan 404, supaya penyebabnya jelas. Endpoint ini `@Public` karena dipakai di struk dan laporan warga yang tidak punya sesi.
+
+Batas ukuran `PHOTO_MAX_BYTES` (2 MB) diperiksa sebelum gambar disentuh. `sharp` membuang EXIF dan menormalkan orientasi — foto lapangan sering membawa metadata lokasi yang tidak perlu disebar.
+
+### 6.4 Rute dan lalu lintas
+
+`GET /maps/route` mengembalikan alternatif rute beserta kondisi lalu lintas, dengan rantai penyedia yang jujur soal sumbernya:
+
+| Urutan | Penyedia | Syarat | `provider` dilaporkan |
+|---|---|---|---|
+| 1 | Google Routes API v2 | `GOOGLE_MAPS_API_KEY` | `google` |
+| 2 | Mapbox Directions (`driving-traffic`) | `MAPBOX_TOKEN` | `mapbox` |
+| 3 | OSRM | `OSRM_BASE_URL` | `osrm` |
+| 4 | Garis lurus | selalu tersedia | `straight` |
+
+`ROUTING_TRAFFIC=true` meminta `TRAFFIC_AWARE_OPTIMAL` ke Google. `provider: straight` bukan kegagalan yang disembunyikan: respons tetap membawa jarak, tetapi tanpa klaim lalu lintas, dan UI wajib menyebutnya apa adanya.
+
+Kegagalan satu penyedia tidak menggagalkan permintaan; rantai berlanjut. Hasil disimpan di cache memori 45 detik dengan 96 entri — cukup untuk menahan polling pengemudi tanpa menyajikan data basi.
+
+Setiap alternatif membawa `distanceMeters`, `durationSeconds`, `congestion` (`lancar` | `padat` | `macet`), `congestionScore`, dan `legs`. Ambang label: `<0,15` lancar, `<0,4` padat, sisanya macet.
+
+### 6.5 Antrean penugasan (dispatch)
+
+Modul `dispatch` menjawab pertanyaan yang sebelumnya tidak terjawab: batch menunggu angkut, lalu siapa yang mengambil, kapan, dan mengapa batch itu lebih dulu.
+
+**Skor prioritas** dihitung dari empat komponen berbobot tetap:
+
+```
+prioritas = 0,34 x umur + 0,18 x gerbang + 0,18 x berat + 0,30 x jangkauan
+```
+
+| Komponen | Sumber |
+|---|---|
+| Umur | Jam sejak batch dicatat, makin tua makin tinggi |
+| Gerbang | Skor per hasil: `PERBAIKI` 88, `ALIHKAN` 70, `LOLOS` 50 — batch yang butuh perbaikan paling mendesak diambil lebih dulu |
+| Berat | Massa batch terhadap batas tampung |
+| Jangkauan | Jarak ke kandidat armada; batch yang tak terjangkau naik karena butuh keputusan manusia |
+
+Faktor pembusukan dikalikan sesuai kombinasi `flow` dan kadar air. Batch berstatus `TOLAK` tidak pernah masuk antrean — `eligible: false` beserta alasannya.
+
+**Pemilihan kendaraan** menyaring kapasitas dulu (tidak ada penugasan yang membuat muatan melebihi kapasitas), lalu memberi penalti pada armada yang lama tidak bergerak dan yang sudah punya banyak stop terbuka, lalu memilih ETA terendah.
+
+Matriks jarak memakai Mapbox bila titik ≤ 10; di atas itu haversine, karena matriks besar mahal dan tidak sepadan untuk papan antrean. Respons menyebut `matrixSource` (`mapbox` atau `haversine`) supaya ETA tidak diklaim lebih presisi daripada sumbernya.
+
+| Endpoint | Perilaku |
+|---|---|
+| `GET /dispatch/board` | Batch menunggu tanpa stop terbuka + armada aktif beserta sisa kapasitas dan ETA |
+| `POST /dispatch/assign` | Buat stop `AMBIL` pada rencana `AKTIF` hari ini, dengan pemeriksaan kapasitas |
+| `POST /dispatch/auto` | Tugaskan otomatis sampai `DISPATCH_MAX_PER_RUN` |
+
+`DISPATCH_AUTO_ON_CREATE=true` membuat batch baru langsung ditugaskan saat dicatat; ini yang membuat pengemudi melihat pekerjaan tanpa menunggu ada yang membuka papan antrean.
+
+**Transisi status yang mudah terlewat:** saat stop `AMBIL` ditandai `SELESAI`, `routing.confirmStop` memindahkan batch dari `MENUNGGU_ANGKUT` ke `DIANGKUT`. Tanpa ini, pengemudi menyelesaikan pekerjaan tetapi batch tetap terlihat menunggu angkut.
+
+### 6.6 Pola implementasi wajib
 
 **1. Mutasi terjaga (guarded mutation).** Semua transisi status memakai CTE sehingga tidak ada balapan:
 
@@ -449,6 +521,7 @@ Tingkat: `INFO`, `PERHATIAN`, `KRITIS`. Satu anomali terbuka per (batch, jenis) 
 | `GET /public/sppg/:slug` | 60/menit |
 | `POST /public/tickets` | 30/10 menit + 3/jam/IP-hash + 20/hari/SPPG |
 | `POST /public/photos` | 10/jam |
+| `GET /photos/file/:sha256?exp=&sig=` | tanda tangan HMAC, 900 dtk |
 | `GET /public/struk/:token` | 60/menit |
 | `GET /health` | — |
 
@@ -485,8 +558,19 @@ Tingkat: `INFO`, `PERHATIAN`, `KRITIS`. Satu anomali terbuka per (batch, jenis) 
 | `POST /routes/plan`, `GET /routes`, `GET /routes/:id` | admin, dlh_auditor, driver (sendiri) |
 | `PATCH /routes/:id/stops/:stopId` | admin, dlh_auditor, driver |
 | `POST /routes/:id/replan` | admin |
-| `GET /menu/items`, `POST /menu/items`, `POST /menu/servings`, `POST /menu/observations` | sppg_staff, admin |
+| `GET /menu/items`, `GET /menu/servings`, `POST /menu/items`, `POST /menu/servings`, `POST /menu/observations` | sppg_staff, admin |
 | `GET /menu/insights` | admin, dlh_auditor, sppg_staff |
+
+**Peta, penugasan, dan dampak**
+
+| Endpoint | Peran |
+|---|---|
+| `GET /maps/directions` | semua login — satu rute, satu penyedia terpilih |
+| `GET /maps/route` | semua login — alternatif + kondisi lalu lintas |
+| `GET /dispatch/board` | admin, dlh_auditor, sppg_staff — papan antrean penugasan |
+| `POST /dispatch/assign` | admin, dlh_auditor — tugaskan satu batch ke satu armada |
+| `POST /dispatch/auto` | admin, dlh_auditor — tugaskan otomatis sampai batas per putaran |
+| `GET /dashboard/impact` | admin, dlh_auditor — perbandingan fasilitas terdekat vs keputusan ARGUS |
 
 **Tiket dan anomali**
 
@@ -709,13 +793,17 @@ Seluruh variabel ada di `.env.example` dengan nilai contoh. Aturan yang dipegang
 
 | Kelompok | Variabel kunci | Catatan |
 |---|---|---|
-| Aplikasi | `NODE_ENV`, `PORT`, `FRONTEND_URL`, `PUBLIC_APP_URL` | `PUBLIC_APP_URL` dipakai membentuk tautan struk |
+| Aplikasi | `NODE_ENV`, `PORT`, `FRONTEND_URL`, `PUBLIC_APP_URL`, `PUBLIC_API_URL` | `PUBLIC_APP_URL` dipakai membentuk tautan struk; `PUBLIC_API_URL` membentuk URL foto |
 | Database | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_POOL_SIZE`, `DB_SSL` | — |
 | Auth | `JWT_SECRET` (min 64), `JWT_EXPIRES_IN`, `BCRYPT_ROUNDS`, `IP_HASH_SALT` (min 32) | Wajib di produksi |
 | Perangkat | `DEVICE_SECRET_ENC_KEY` (64 hex) | Kunci AES-256-GCM untuk secret timbangan |
 | Struk | `STRUK_TOKEN_SECRET` (min 32), `STRUK_TOKEN_TTL_HOURS` | Rotasi = mencabut semua tautan beredar |
 | MQTT | `MQTT_URL`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_CA_PATH` | Produksi wajib `mqtts://` |
-| Storage | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | S3/MinIO |
+| Storage foto | `STORAGE_DRIVER`, `STORAGE_DIR`, `PUBLIC_API_URL`, `PHOTO_URL_SECRET`, `PHOTO_SIGNED_URL_TTL_SECONDS`, `PHOTO_MAX_BYTES` | `filesystem` default; `PUBLIC_API_URL` dipakai membentuk URL foto |
+| S3/MinIO | `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | Hanya bila `STORAGE_DRIVER=s3` |
+| Cloudinary | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CLOUDINARY_FOLDER` | Hanya bila `STORAGE_DRIVER=cloudinary` |
+| Rute | `GOOGLE_MAPS_API_KEY`, `OSRM_BASE_URL`, `ROUTING_TRAFFIC`, `ROUTING_ALTERNATIVES`, `ROUTING_TIMEOUT_MS` | Rantai Google → Mapbox → OSRM → garis lurus |
+| Penugasan | `DISPATCH_AUTO_ON_CREATE`, `DISPATCH_MAX_PER_RUN` | Papan antrean dan penugasan otomatis |
 | Layanan luar | `OPTIMIZER_URL`, `ANALYTICS_URL`, `MAPBOX_TOKEN`, `LLM_*` | Semua opsional; fitur mati bila kosong |
 | Rate limit | `THROTTLE_GLOBAL_PER_MIN`, `TICKET_RATE_*`, `EXPORT_RATE_PER_DAY` | — |
 | Operasional | `OPS_WEBHOOK_URL`, `CHAIN_VERIFY_*`, `TELEMETRY_*_DAYS`, `DEMO_MODE` | — |
@@ -728,6 +816,9 @@ Seluruh variabel ada di `.env.example` dengan nilai contoh. Aturan yang dipegang
 | `MIGRATIONS_RUN` | `false` di aplikasi utama. Migrasi dijalankan job terpisah |
 | `LLM_API_KEY` | Kosong = narasi mati; endpoint mengembalikan `status: DISABLED` |
 | `RETENTION_PURGE_ENABLED` | `false` = mode laporan saja |
+| `STORAGE_DRIVER` | `filesystem` menulis ke `STORAGE_DIR`; `s3` dan `cloudinary` mengabaikan folder lokal. Berganti driver tidak memindahkan foto lama |
+| `ROUTING_TRAFFIC` | `false` = Google diminta tanpa `TRAFFIC_AWARE_OPTIMAL`; waktu tempuh jadi tanpa lalu lintas |
+| `DISPATCH_AUTO_ON_CREATE` | `true` = batch baru langsung memperoleh stop `AMBIL` tanpa ada yang membuka papan antrean |
 
 ---
 
@@ -748,7 +839,9 @@ Zero-downtime tidak diklaim untuk fase ini. Downtime terjadwal di jendela dini h
 | Data | Strategi |
 |---|---|
 | PostgreSQL | `pg_dump` harian + WAL archiving; 30 harian + 12 bulanan |
-| Foto | Replikasi bucket ke lokasi kedua |
+| Foto — `filesystem` | Salin `STORAGE_DIR` (rsync/restic) ke lokasi kedua; struktur shard 2 karakter membuat salinan inkremental murah |
+| Foto — `s3` | Replikasi bucket (versioning + cross-region replication) |
+| Foto — `cloudinary` | Backup bergantung paket akun; unduh berkas asli secara berkala ke penyimpanan sendiri |
 | Verifikasi pasca-restore | `npm run verify:chains` pada sampel batch |
 
 **Aturan: restore tanpa verifikasi rantai dianggap restore gagal.** Bukti yang tidak bisa diverifikasi bukan bukti.
@@ -829,6 +922,16 @@ Hal yang sama berlaku untuk `fasilitasNama` (harus persis, case-sensitive) dan `
 
 Normal bila broker belum dinyalakan. Ingest telemetri tidak aktif, sisanya berfungsi. Nyalakan broker, atau abaikan di pengembangan.
 
+### Foto mengembalikan 403, 404, atau 503
+
+| Status | Sebab yang paling sering |
+|---|---|
+| 403 | `exp` sudah lewat atau `sig` tidak cocok — URL lama, atau `PHOTO_URL_SECRET` berubah sehingga semua tautan beredar dicabut |
+| 404 | Baris `foto` ada tetapi berkasnya tidak ada di penyimpanan: `STORAGE_DRIVER` diganti, atau `STORAGE_DIR` dipindah tanpa memindahkan berkas |
+| 503 | Penyedia tidak terjangkau. Untuk `filesystem`, periksa izin dan keberadaan `STORAGE_DIR`; untuk `s3`/`cloudinary`, periksa kredensial |
+
+Mengganti driver **tidak** memindahkan foto lama. Bila perlu berpindah, salin berkas terlebih dahulu, baru ubah `STORAGE_DRIVER` — dan ingat `sha256` adalah kunci nama berkas, sehingga salinan bisa diverifikasi per berkas.
+
 ### Waktu terlihat meleset
 
 Semua waktu disimpan sebagai `TIMESTAMPTZ` (UTC). Konversi ke WIB (UTC+7) dilakukan saat menampilkan. Ekspor CSV dan laporan PDF memakai tanggal WIB, sehingga batch pukul 23:00 WIB masuk ke tanggal yang benar, bukan hari berikutnya UTC.
@@ -867,6 +970,8 @@ Bagian ini jujur menyebut apa yang belum sinkron antara kode, dokumentasi, dan b
 | `docs/06` §6 | Menulis retensi telemetri "drop > 12 bulan"; kode memakai 90 hari (`TELEMETRY_DROP_AFTER_DAYS`) | Kebingungan kebijakan |
 | `docs/03` §2.11 | Menyebut `GET /parameters` dan `PUT /parameters/:kunci` — keduanya **sudah ada**; `seed:akun` belum terdokumentasi di `docs/06` §4 | Dokumentasi tertinggal dari kode |
 | `test/app.e2e-spec.ts` | Kerangka kosong; skenario K5 belum ditulis | Regresi alur utama hanya tertangkap uji manual |
+| `dispatch/dispatch.util.ts`, `dashboard/impact.util.ts` | Fungsi skor berbobot tanpa unit test; kebenarannya hanya diverifikasi lewat endpoint hidup | Perubahan bobot bisa lolos tanpa tertangkap |
+| `maps/traffic.service.ts` | Rantai penyedia dan fallback belum diuji dengan respons tiruan | Kegagalan penyedia hanya terbukti saat diuji manual |
 
 Perbaikan berkas infrastruktur sebaiknya dikerjakan sebagai satu batch tersendiri, bukan diselipkan.
 
